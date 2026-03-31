@@ -20,11 +20,16 @@ public:
 
 	UMABSAbilityComponent();
 
+	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
+
 	UPROPERTY(BlueprintAssignable, Category="MABS|Debug")
 	FMABSAbilityDebugEventSignature OnAbilityDebugEvent;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Abilities")
 	FMABSAbilityHandle GrantAbility(UMABSAbilityDefinition* AbilityDefinition);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Abilities")
+	bool SetAbilityBlockedByTag(FGameplayTag AbilityTag, bool bBlocked);
 
 	UFUNCTION(BlueprintCallable, Category="MABS|Abilities")
 	EMABSAbilityActivationResult TryActivateAbilityByTag(FGameplayTag AbilityTag);
@@ -32,12 +37,15 @@ public:
 	UFUNCTION(BlueprintPure, Category="MABS|Abilities")
 	TArray<FMABSAbilitySpec> GetGrantedAbilities() const;
 
+	UFUNCTION(BlueprintPure, Category="MABS|Abilities")
+	bool FindGrantedAbilitySpecByTag(FGameplayTag AbilityTag, FMABSAbilitySpec& OutAbilitySpec) const;
+
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	TArray<FMABSAbilityDebugEvent> GetRecentDebugEvents() const;
 
 protected:
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Abilities", Transient)
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Abilities", Transient, Replicated)
 	TArray<FMABSAbilitySpec> GrantedAbilities;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Debug", Transient)
@@ -48,15 +56,45 @@ protected:
 
 private:
 
-	FMABSAbilitySpec* FindGrantedAbilityByTag(const FGameplayTag& AbilityTag);
+	UFUNCTION(Server, Reliable)
+	void ServerTryActivateAbilityByTag(FGameplayTag AbilityTag);
 
-	void EmitDebugEvent(
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveAbilityDebugEvent(const FMABSAbilityDebugEvent& DebugEvent);
+
+	EMABSAbilityActivationResult HandleTryActivateAbility(const FGameplayTag& AbilityTag, bool bNotifyOwningClient);
+
+	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec) const;
+
+	void CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+
+	FMABSAbilitySpec* FindGrantedAbilitySpecByTagMutable(const FGameplayTag& AbilityTag);
+
+	const FMABSAbilitySpec* FindGrantedAbilitySpecByTagInternal(const FGameplayTag& AbilityTag) const;
+
+	FMABSAbilitySpec* FindGrantedAbilitySpecByHandle(const FMABSAbilityHandle& AbilityHandle);
+
+	void ResetAbilityToIdle(FMABSAbilityHandle AbilityHandle);
+
+	FMABSAbilityDebugEvent MakeDebugEvent(
+		FName EventName,
+		const FGameplayTag& AbilityTag,
+		const FMABSAbilityHandle& AbilityHandle,
+		EMABSAbilityRuntimeState RuntimeState,
+		EMABSAbilityActivationResult ActivationResult,
+		const FString& Message) const;
+
+	void RecordDebugEvent(const FMABSAbilityDebugEvent& DebugEvent);
+
+	FMABSAbilityDebugEvent EmitDebugEvent(
 		FName EventName,
 		const FGameplayTag& AbilityTag,
 		const FMABSAbilityHandle& AbilityHandle,
 		EMABSAbilityRuntimeState RuntimeState,
 		EMABSAbilityActivationResult ActivationResult,
 		const FString& Message);
+
+	void EmitDebugEventToOwningClient(const FMABSAbilityDebugEvent& DebugEvent);
 
 	bool CanMutateAbilityState() const;
 

@@ -25,7 +25,7 @@ struct MABS_API FMABSAbilityDebugEvent
 	EMABSAbilityRuntimeState RuntimeState = EMABSAbilityRuntimeState::None;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
-	EMABSAbilityActivationResult ActivationResult = EMABSAbilityActivationResult::InvalidRequest;
+	EMABSAbilityActivationResult ActivationResult = EMABSAbilityActivationResult::None;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
 	FString OwnerName;

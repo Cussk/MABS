@@ -10,22 +10,23 @@ class UMABSAbilityDefinition;
 UENUM(BlueprintType)
 enum class EMABSAbilityActivationResult : uint8
 {
+	None UMETA(DisplayName="None"),
 	Success UMETA(DisplayName="Success"),
-	InvalidRequest UMETA(DisplayName="Invalid Request"),
-	InvalidDefinition UMETA(DisplayName="Invalid Definition"),
-	AbilityNotGranted UMETA(DisplayName="Ability Not Granted"),
-	RequiresAuthority UMETA(DisplayName="Requires Authority"),
-	NotImplemented UMETA(DisplayName="Not Implemented")
+	RequestSentToServer UMETA(DisplayName="Request Sent To Server"),
+	InvalidAbility UMETA(DisplayName="Invalid Ability"),
+	NotGranted UMETA(DisplayName="Not Granted"),
+	AlreadyActive UMETA(DisplayName="Already Active"),
+	Blocked UMETA(DisplayName="Blocked"),
+	AuthorityRejected UMETA(DisplayName="Authority Rejected")
 };
 
 UENUM(BlueprintType)
 enum class EMABSAbilityRuntimeState : uint8
 {
 	None UMETA(DisplayName="None"),
-	Granted UMETA(DisplayName="Granted"),
-	ActivationRequested UMETA(DisplayName="Activation Requested"),
+	Idle UMETA(DisplayName="Idle"),
 	Active UMETA(DisplayName="Active"),
-	Ended UMETA(DisplayName="Ended")
+	Blocked UMETA(DisplayName="Blocked")
 };
 
 UENUM(BlueprintType)
@@ -35,6 +36,13 @@ enum class EMABSTargetType : uint8
 	Self UMETA(DisplayName="Self"),
 	Actor UMETA(DisplayName="Actor"),
 	Location UMETA(DisplayName="Location")
+};
+
+UENUM(BlueprintType)
+enum class EMABSAbilityActivationPolicy : uint8
+{
+	OnInputTriggered UMETA(DisplayName="On Input Triggered"),
+	Passive UMETA(DisplayName="Passive")
 };
 
 USTRUCT(BlueprintType)
@@ -85,5 +93,11 @@ struct MABS_API FMABSAbilitySpec
 	TObjectPtr<UMABSAbilityDefinition> AbilityDefinition = nullptr;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
-	EMABSAbilityRuntimeState RuntimeState = EMABSAbilityRuntimeState::Granted;
+	FGameplayTag AbilityTag;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	EMABSAbilityRuntimeState RuntimeState = EMABSAbilityRuntimeState::Idle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	EMABSAbilityActivationResult LastActivationResult = EMABSAbilityActivationResult::None;
 };

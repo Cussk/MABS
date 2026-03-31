@@ -19,6 +19,12 @@ public:
 	FGameplayTag AbilityTag;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
+	FText DisplayName;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
+	EMABSAbilityActivationPolicy ActivationPolicy = EMABSAbilityActivationPolicy::OnInputTriggered;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	EMABSTargetType TargetType = EMABSTargetType::Self;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))

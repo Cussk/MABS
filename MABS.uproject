@@ -17,6 +17,10 @@
 	],
 	"Plugins": [
 		{
+			"Name": "MABS",
+			"Enabled": true
+		},
+		{
 			"Name": "ModelingToolsEditorMode",
 			"Enabled": true,
 			"TargetAllowList": [

@@ -2,11 +2,39 @@
 
 ## What it is
 
-This document lists the current Phase 01 public surface for MABS and shows which type owns authored data, runtime state, execution, and debug output.
+This document lists the current Phase 1.5 public surface for MABS and shows which module owns authored data, runtime state, execution, and debug helpers.
 
 ## Why it exists
 
-Phase 01 is the first end-to-end gameplay slice. A user can now grant an authored ability, request activation by gameplay tag, route client requests to the server, and inspect structured success or failure results.
+Phase 1.5 keeps the existing Phase 01 gameplay slice, but it moves that slice into a plugin-first architecture. Users still need a clear view of what type to use and which module now owns it.
+
+## Module ownership
+
+### `MABSCore`
+
+Owns foundational runtime data:
+
+* `EMABSAbilityActivationResult`
+* `EMABSAbilityRuntimeState`
+* `EMABSTargetType`
+* `EMABSAbilityActivationPolicy`
+* `FMABSAbilityHandle`
+* `FMABSAbilitySpec`
+* `FMABSAbilityDebugEvent`
+* `UMABSAbilityDefinition`
+* `LogMABSAbilitySystem`
+
+### `MABSGameplay`
+
+Owns gameplay execution:
+
+* `UMABSAbilityComponent`
+
+### `MABSDebug`
+
+Owns runtime-safe debug helpers:
+
+* `UMABSDebugBlueprintLibrary`
 
 ## Enums
 
@@ -107,33 +135,22 @@ Current public events:
 
 * `OnAbilityDebugEvent`
 
-## Responsibility split
+### `UMABSDebugBlueprintLibrary`
 
-Data:
+A runtime-safe helper library for debug consumers.
 
-* `UMABSAbilityDefinition`
+Current public functions:
 
-Runtime state:
-
-* `FMABSAbilityHandle`
-* `FMABSAbilitySpec`
-
-Execution:
-
-* `UMABSAbilityComponent`
-
-Observability:
-
-* `FMABSAbilityDebugEvent`
-* `LogMABSAbilitySystem`
+* `FormatAbilityDebugEvent(const FMABSAbilityDebugEvent& DebugEvent)`
 
 ## How to use it
 
-1. Create a `UMABSAbilityDefinition` asset with a valid `AbilityTag`.
-2. Add `UMABSAbilityComponent` to the owning actor or character.
-3. Grant the definition on the authoritative owner with `GrantAbility`.
-4. Call `TryActivateAbilityByTag` from input or gameplay code.
-5. Inspect `OnAbilityDebugEvent`, `GetRecentDebugEvents`, or the replicated `FMABSAbilitySpec` state for the outcome.
+1. Enable the `MABS` plugin.
+2. Create a `UMABSAbilityDefinition` asset with a valid `AbilityTag`.
+3. Add `UMABSAbilityComponent` to the owning actor or character.
+4. Grant the definition on the authoritative owner with `GrantAbility`.
+5. Call `TryActivateAbilityByTag` from input or gameplay code.
+6. Inspect `OnAbilityDebugEvent`, `GetRecentDebugEvents`, or formatted debug strings for the outcome.
 
 ## Example
 

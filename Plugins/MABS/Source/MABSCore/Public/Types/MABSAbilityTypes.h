@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "MABSAbilityTypes.generated.h"
 
 class UMABSAbilityDefinition;
@@ -46,7 +47,7 @@ enum class EMABSAbilityActivationPolicy : uint8
 };
 
 USTRUCT(BlueprintType)
-struct MABS_API FMABSAbilityHandle
+struct MABSCORE_API FMABSAbilityHandle
 {
 	GENERATED_BODY()
 
@@ -82,7 +83,7 @@ FORCEINLINE uint32 GetTypeHash(const FMABSAbilityHandle& Handle)
 }
 
 USTRUCT(BlueprintType)
-struct MABS_API FMABSAbilitySpec
+struct MABSCORE_API FMABSAbilitySpec
 {
 	GENERATED_BODY()
 

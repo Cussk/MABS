@@ -9,7 +9,7 @@
 #include "MABSAbilityDefinition.generated.h"
 
 UCLASS(BlueprintType)
-class MABS_API UMABSAbilityDefinition : public UDataAsset
+class MABSCORE_API UMABSAbilityDefinition : public UDataAsset
 {
 	GENERATED_BODY()
 

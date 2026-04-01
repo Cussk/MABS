@@ -4,4 +4,4 @@
 
 #include "CoreMinimal.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogMABSAbilitySystem, Log, All);
+MABSCORE_API DECLARE_LOG_CATEGORY_EXTERN(LogMABSAbilitySystem, Log, All);

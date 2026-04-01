@@ -10,7 +10,7 @@ MABS is intentionally split into authored data and live runtime state. Without t
 
 ## Ability definitions
 
-`UMABSAbilityDefinition` is the authored asset.
+`UMABSAbilityDefinition` is the authored asset from `MABSCore`.
 
 It describes what an ability is, not what it is doing right now.
 
@@ -36,7 +36,7 @@ That runtime entry is `FMABSAbilitySpec`. Each granted spec stores:
 * the current runtime state
 * the last activation result
 
-The component owns these specs. The data asset does not.
+The runtime component in `MABSGameplay` owns these specs. The data asset does not.
 
 ## Activation
 
@@ -79,10 +79,10 @@ Keeping those separate is what makes the system multiplayer-safe and extensible.
 Example ability setup:
 
 1. Create `DA_TestFireball`.
-2. Set `AbilityTag` to `Ability.Test.Fireball`.
+2. Set `AbilityTag` to `Test.Ability.Fireball`.
 3. Set `DisplayName` to `Fireball`.
 4. Grant it to the player character on the server.
-5. Press an input key that calls `TryActivateAbilityByTag(Ability.Test.Fireball)`.
+5. Press an input key that calls `TryActivateAbilityByTag(Test.Ability.Fireball)`.
 6. Observe `RequestAccepted` and `CommitSucceeded` in the log for a successful activation.
 
 ## Not included in this phase

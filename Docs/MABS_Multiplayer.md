@@ -6,7 +6,7 @@ This document explains how Phase 01 handles multiplayer authority for ability ac
 
 ## Why it exists
 
-Ability systems are easy to make locally and easy to break in multiplayer. MABS keeps the activation decision on the server from the first real gameplay slice so later phases do not need to undo local-only assumptions.
+Ability systems are easy to make locally and easy to break in multiplayer. MABS keeps the activation decision on the server from the first real gameplay slice so later phases do not need to undo local-only assumptions. Phase 1.5 keeps that authority model unchanged while moving the code into plugin modules.
 
 ## Server authority
 
@@ -56,7 +56,7 @@ All player activation requests go to the dedicated server, which decides success
 Example multiplayer verification flow:
 
 1. Start PIE with one listen server and one client.
-2. Grant `Ability.Test.Fireball` on the server-owned player character.
+2. Grant `Test.Ability.Fireball` on the server-owned player character.
 3. Press the bound activation input on the remote client.
 4. Verify the client records `RequestSentToServer`.
 5. Verify the server records `RequestAccepted` and `CommitSucceeded`.

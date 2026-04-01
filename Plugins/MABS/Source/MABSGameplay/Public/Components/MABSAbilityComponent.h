@@ -12,7 +12,7 @@
 class UMABSAbilityDefinition;
 
 UCLASS(ClassGroup=(MABS), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
-class MABS_API UMABSAbilityComponent : public UActorComponent
+class MABSGAMEPLAY_API UMABSAbilityComponent : public UActorComponent
 {
 	GENERATED_BODY()
 

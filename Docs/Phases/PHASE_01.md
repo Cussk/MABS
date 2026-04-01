@@ -38,10 +38,10 @@ Phase 00 established the architecture. Phase 01 proves that architecture can now
 
 Example Phase 01 flow:
 
-1. Create `DA_TestFireball` with tag `Ability.Test.Fireball`.
+1. Create `DA_TestFireball` with tag `Test.Ability.Fireball`.
 2. Add `UMABSAbilityComponent` to the player character.
 3. On server `BeginPlay`, call `GrantAbility(DA_TestFireball)`.
-4. On input, call `TryActivateAbilityByTag(Ability.Test.Fireball)`.
+4. On input, call `TryActivateAbilityByTag(Test.Ability.Fireball)`.
 5. In standalone, expect `RequestAccepted` and `CommitSucceeded`.
 6. In multiplayer, expect remote clients to see `RequestSentToServer` before receiving the server result.
 

@@ -1,0 +1,33 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.5.0",
+	"FriendlyName": "MABS",
+	"Description": "Lightweight, multiplayer-ready, data-driven ability framework for Unreal Engine.",
+	"Category": "Gameplay",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "MABSCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "MABSGameplay",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "MABSDebug",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "MABSEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}

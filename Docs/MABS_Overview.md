@@ -4,14 +4,14 @@
 
 MABS stands for **Multiplayer Ability System**.
 
-It is a lightweight, multiplayer-ready, data-driven ability framework for Unreal Engine. The framework separates authored data from live runtime state and keeps gameplay approval on the server.
+As of Phase 1.5, MABS is a plugin-first, multiplayer-ready, data-driven ability framework for Unreal Engine. It keeps authored data, runtime state, gameplay execution, debug tooling, and editor-only code in separate modules so the runtime path stays clean and marketplace-oriented.
 
-Abilities are split into clear layers:
+Current runtime ownership is:
 
-* authored data in `UMABSAbilityDefinition`
-* runtime grant state in `FMABSAbilitySpec`
-* execution ownership in `UMABSAbilityComponent`
-* observability in `FMABSAbilityDebugEvent`
+* `MABSCore` for authored data and foundational runtime types
+* `MABSGameplay` for granting, activation, validation, commit, and replication
+* `MABSDebug` for runtime-safe debug helpers
+* `MABSEditor` for editor-only extensions
 
 ## Why it exists
 
@@ -21,59 +21,58 @@ Most teams need the same ability building blocks:
 * a runtime owner component for characters and actors
 * server-authoritative multiplayer behavior
 * enough telemetry to understand request flow and failures
+* a module layout that can grow without mixing editor and runtime code
 
-MABS is meant to provide that foundation in a form that is easy to inspect, extend, and ship.
+MABS provides that foundation in a form that is easy to inspect, extend, and ship.
 
-## Who it is for
+## What Phase 1.5 delivers
 
-MABS is aimed at:
+Phase 1.5 keeps the existing Phase 01 behavior and reorganizes it into plugin modules.
 
-* indie teams
-* small multiplayer projects
-* programmers who want a clean extension point
-* designers who want editable ability data assets
-
-## What Phase 01 delivers
-
-Phase 01 moves MABS past the skeleton stage. It adds:
+The preserved runtime behavior includes:
 
 * granted ability storage on `UMABSAbilityComponent`
-* real `FMABSAbilitySpec` runtime tracking
+* replicated `FMABSAbilitySpec` runtime state
 * `TryActivateAbilityByTag` with a client-to-server RPC path
-* authority-side validation and commit
-* small, explicit failure reasons
+* authority-side validation and lightweight commit
 * structured debug events for request start, send, accept, reject, and commit
 
-This gives the project a real end-to-end path from an authored data asset to a multiplayer-safe activation request.
+What changed in this phase is ownership and packaging:
 
-## What MABS does not try to solve in V1
+* the ability types and definitions moved into `MABSCore`
+* the component moved into `MABSGameplay`
+* runtime-safe debug helpers now live in `MABSDebug`
+* editor-only extension space now lives in `MABSEditor`
+* Unreal redirects preserve existing asset references after the move
 
-MABS does not currently implement:
+## Content ownership in the current project
 
-* client prediction
-* advanced stacking rules
-* duration-based effects
-* complex targeting pipelines
-* gameplay costs or cooldown execution
-* ability UI packages
+The plugin is now the reusable runtime product.
 
-Those belong to later phases once the request and runtime state model are stable.
+The current host project still contains development harness content such as:
+
+* `Config/DefaultGameplayTags.ini`
+* `Content/Data/DA_Test_Fireball.uasset`
+* Third Person Blueprint setup used to verify the flow
+
+That content is useful for testing and examples, but it is not treated as core plugin runtime content in Phase 1.5.
 
 ## How to use it
 
-1. Create a `UMABSAbilityDefinition` asset with a valid ability tag.
-2. Add `UMABSAbilityComponent` to the owning actor.
-3. Grant the definition on the server.
-4. Call `TryActivateAbilityByTag`.
-5. Inspect `OnAbilityDebugEvent`, `GetRecentDebugEvents`, or the granted ability specs to see the outcome.
+1. Enable the local `MABS` plugin.
+2. Create a `UMABSAbilityDefinition` asset.
+3. Add `UMABSAbilityComponent` to the owning actor.
+4. Grant the definition on the server.
+5. Call `TryActivateAbilityByTag`.
+6. Inspect `OnAbilityDebugEvent`, `GetRecentDebugEvents`, or `UMABSDebugBlueprintLibrary::FormatAbilityDebugEvent`.
 
 ## Example
 
-A typical Phase 01 flow is:
+A typical Phase 1.5 flow is:
 
-1. Create a `MABSAbilityDefinition` asset with tag `Ability.Test.Fireball`.
+1. Create a `MABSAbilityDefinition` asset with tag `Test.Ability.Fireball`.
 2. Add `UMABSAbilityComponent` to the player character.
 3. Grant the definition on the server during setup.
-4. Bind input to `TryActivateAbilityByTag(Ability.Test.Fireball)`.
+4. Bind input to `TryActivateAbilityByTag(Test.Ability.Fireball)`.
 5. In standalone or as the listen server host, the server accepts and commits immediately.
 6. As a remote client, the request is sent to the server and the owning client receives structured acceptance or rejection events.

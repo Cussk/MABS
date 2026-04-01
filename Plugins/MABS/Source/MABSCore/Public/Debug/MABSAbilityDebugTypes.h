@@ -8,7 +8,7 @@
 #include "MABSAbilityDebugTypes.generated.h"
 
 USTRUCT(BlueprintType)
-struct MABS_API FMABSAbilityDebugEvent
+struct MABSCORE_API FMABSAbilityDebugEvent
 {
 	GENERATED_BODY()
 

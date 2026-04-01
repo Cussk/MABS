@@ -11,6 +11,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "MABS.h"
+#include "Math/UnrealMathUtility.h"
 
 AMABSCharacter::AMABSCharacter()
 {
@@ -46,8 +47,17 @@ AMABSCharacter::AMABSCharacter()
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
 
+	CurrentExampleHealth = MaxExampleHealth;
+
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+}
+
+void AMABSCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	CurrentExampleHealth = MaxExampleHealth;
 }
 
 void AMABSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -130,4 +140,32 @@ void AMABSCharacter::DoJumpEnd()
 {
 	// signal the character to stop jumping
 	StopJumping();
+}
+
+float AMABSCharacter::GetExampleHealthNormalized() const
+{
+	return MaxExampleHealth > 0.0f ? CurrentExampleHealth / MaxExampleHealth : 0.0f;
+}
+
+float AMABSCharacter::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	const float AppliedDamage = FMath::Max(0.0f, Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser));
+	if (AppliedDamage <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	CurrentExampleHealth = FMath::Clamp(CurrentExampleHealth - AppliedDamage, 0.0f, MaxExampleHealth);
+	return AppliedDamage;
+}
+
+bool AMABSCharacter::ApplyMABSHeal_Implementation(float HealAmount, AActor* SourceActor, UMABSAbilityDefinition* SourceAbility)
+{
+	if (HealAmount <= 0.0f || MaxExampleHealth <= 0.0f)
+	{
+		return false;
+	}
+
+	CurrentExampleHealth = FMath::Clamp(CurrentExampleHealth + HealAmount, 0.0f, MaxExampleHealth);
+	return true;
 }

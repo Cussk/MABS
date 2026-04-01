@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the Phase 1.5 module layout for MABS and what each module owns.
+This document explains the Phase 2 module layout for MABS and what each module owns.
 
 ## Why it exists
 
-Phase 01 proved the grant-and-activate flow. Phase 1.5 reorganizes that flow into a plugin-first layout so runtime code, debug tooling, and editor-only code can evolve without collapsing back into one module.
+Phase 01 proved the grant-and-activate flow. Phase 1.5 reorganized that flow into a plugin-first layout. Phase 2 keeps that structure and adds targeting and instant effects without collapsing responsibilities back together.
 
 ## Module map
 
@@ -25,11 +25,11 @@ How to use it:
 
 * create `UMABSAbilityDefinition` assets
 * read `FMABSAbilitySpec` and `FMABSAbilityDebugEvent`
-* use the shared enums and handles in gameplay or debug code
+* use shared enums such as `EMABSTargetType` and `EMABSInstantEffectType`
 
 Example:
 
-* a designer-authored fireball asset is a `UMABSAbilityDefinition` from `MABSCore`
+* a designer-authored self-heal asset lives entirely in `MABSCore` data
 
 ### `MABSGameplay`
 
@@ -40,17 +40,18 @@ What it is:
 Why it exists:
 
 * it owns the server-authoritative execution path
-* it keeps grant, activation, validation, commit, and replication together
+* it keeps grant, activation, target resolution, effect application, and replication together
 
 How to use it:
 
 * add `UMABSAbilityComponent` to an actor or character
 * grant abilities on authority
 * call `TryActivateAbilityByTag`
+* optionally implement `IMABSInstantEffectReceiver` on actors that should accept MABS heals
 
 Example:
 
-* a player character component grants `Test.Ability.Fireball` on the server, then activates it from input
+* a player character component grants `Test.Ability.SelfHeal` on the server, then activates it from input and heals the owner
 
 ### `MABSDebug`
 
@@ -70,7 +71,7 @@ How to use it:
 
 Example:
 
-* a Blueprint HUD or PIE test harness formats the latest debug event into a readable string
+* a Blueprint HUD or PIE test harness formats the latest target/effect debug event into a readable string
 
 ### `MABSEditor`
 
@@ -88,10 +89,6 @@ How to use it:
 * users do not need to reference this module directly for runtime gameplay
 * it exists for future editor tooling and validation work
 
-Example:
-
-* a future asset validation pass for `UMABSAbilityDefinition` belongs here, not in runtime modules
-
 ## Dependency direction
 
 Allowed dependency flow is:
@@ -105,18 +102,19 @@ This keeps runtime code one-way and prevents editor dependencies from leaking in
 
 ## Host project versus plugin content
 
-Phase 1.5 separates the reusable plugin from the local development harness.
+Phase 2 still separates the reusable plugin from the local development harness.
 
 Current host-project-only items include:
 
 * `Config/DefaultGameplayTags.ini`
 * `Content/Data/DA_Test_Fireball.uasset`
 * Third Person Blueprint wiring used for local verification
+* the example heal receiver state on `AMABSCharacter`
 
 Current plugin runtime responsibility includes:
 
 * reusable code modules only
-* shared runtime types
+* shared runtime types and ability definitions
 * runtime ability execution
 * runtime-safe debug helpers
 
@@ -126,4 +124,4 @@ Current plugin runtime responsibility includes:
 2. Create a `UMABSAbilityDefinition` asset in content.
 3. Add `UMABSAbilityComponent` to a character.
 4. Grant the ability on authority.
-5. Activate by tag and inspect debug events.
+5. Activate by tag and inspect debug events for target and effect steps.

@@ -15,6 +15,7 @@ public class MABS : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"GameplayTags",
+			"MABSGameplay",
 			"AIModule",
 			"StateTreeModule",
 			"GameplayStateTreeModule",

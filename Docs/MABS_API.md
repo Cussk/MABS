@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document lists the current Phase 1.5 public surface for MABS and shows which module owns authored data, runtime state, execution, and debug helpers.
+This document lists the current Phase 2 public surface for MABS and shows which module owns authored data, runtime state, execution, and debug helpers.
 
 ## Why it exists
 
-Phase 1.5 keeps the existing Phase 01 gameplay slice, but it moves that slice into a plugin-first architecture. Users still need a clear view of what type to use and which module now owns it.
+Phase 2 keeps the existing multiplayer-safe activation flow and extends it with simple targeting and instant effects. Users need a clear view of what changed and where the new types live.
 
 ## Module ownership
 
@@ -18,6 +18,7 @@ Owns foundational runtime data:
 * `EMABSAbilityRuntimeState`
 * `EMABSTargetType`
 * `EMABSAbilityActivationPolicy`
+* `EMABSInstantEffectType`
 * `FMABSAbilityHandle`
 * `FMABSAbilitySpec`
 * `FMABSAbilityDebugEvent`
@@ -29,6 +30,7 @@ Owns foundational runtime data:
 Owns gameplay execution:
 
 * `UMABSAbilityComponent`
+* `IMABSInstantEffectReceiver`
 
 ### `MABSDebug`
 
@@ -40,7 +42,7 @@ Owns runtime-safe debug helpers:
 
 ### `EMABSAbilityActivationResult`
 
-Describes the current result of an activation request or the last known result stored on a granted ability spec.
+Describes the result of an activation request or the last known result stored on a granted ability spec.
 
 Current values:
 
@@ -52,6 +54,8 @@ Current values:
 * `AlreadyActive`
 * `Blocked`
 * `AuthorityRejected`
+* `TargetResolutionFailed`
+* `EffectApplicationFailed`
 
 ### `EMABSAbilityRuntimeState`
 
@@ -68,6 +72,13 @@ Current values:
 
 Represents the authored target intent for an ability definition.
 
+Phase 2 supports:
+
+* `Self`
+* `Actor`
+
+`Location` remains present in the enum but is not implemented in this phase.
+
 ### `EMABSAbilityActivationPolicy`
 
 Represents the authored activation intent for an ability definition.
@@ -76,6 +87,16 @@ Current values:
 
 * `OnInputTriggered`
 * `Passive`
+
+### `EMABSInstantEffectType`
+
+Represents the authored instant effect intent for an ability definition.
+
+Current values:
+
+* `None`
+* `Damage`
+* `Heal`
 
 ## Structs
 
@@ -111,12 +132,15 @@ Current authored fields:
 * `DisplayName`
 * `ActivationPolicy`
 * `TargetType`
+* `InstantEffectType`
+* `EffectMagnitude`
+* `TargetTraceDistance`
 * `CooldownSeconds`
 * `ResourceCost`
 
 ### `UMABSAbilityComponent`
 
-A `UActorComponent` that owns granted ability specs, routes activation requests, and emits debug events.
+A `UActorComponent` that owns granted ability specs, routes activation requests, resolves simple targets, applies instant effects, and emits debug events.
 
 Current public functions:
 
@@ -135,6 +159,14 @@ Current public events:
 
 * `OnAbilityDebugEvent`
 
+### `IMABSInstantEffectReceiver`
+
+A minimal optional extension hook for receiving MABS heal effects.
+
+Current public function:
+
+* `ApplyMABSHeal(float HealAmount, AActor* SourceActor, UMABSAbilityDefinition* SourceAbility)`
+
 ### `UMABSDebugBlueprintLibrary`
 
 A runtime-safe helper library for debug consumers.
@@ -147,10 +179,11 @@ Current public functions:
 
 1. Enable the `MABS` plugin.
 2. Create a `UMABSAbilityDefinition` asset with a valid `AbilityTag`.
-3. Add `UMABSAbilityComponent` to the owning actor or character.
-4. Grant the definition on the authoritative owner with `GrantAbility`.
-5. Call `TryActivateAbilityByTag` from input or gameplay code.
-6. Inspect `OnAbilityDebugEvent`, `GetRecentDebugEvents`, or formatted debug strings for the outcome.
+3. Set `TargetType`, `InstantEffectType`, `EffectMagnitude`, and optional `TargetTraceDistance`.
+4. Add `UMABSAbilityComponent` to the owning actor or character.
+5. Grant the definition on the authoritative owner with `GrantAbility`.
+6. Call `TryActivateAbilityByTag` from input or gameplay code.
+7. Inspect debug events or formatted debug strings for the outcome.
 
 ## Example
 
@@ -159,11 +192,11 @@ Example C++ flow:
 ```cpp
 if (AbilityComponent != nullptr && HasAuthority())
 {
-	AbilityComponent->GrantAbility(FireballDefinition);
+	AbilityComponent->GrantAbility(SelfHealDefinition);
 }
 
 const EMABSAbilityActivationResult Result =
-	AbilityComponent->TryActivateAbilityByTag(FireballTag);
+	AbilityComponent->TryActivateAbilityByTag(SelfHealTag);
 ```
 
-In standalone or on the listen server host, a valid granted ability returns `Success`. On a remote client, the local call returns `RequestSentToServer`, then the owning client receives `RequestAccepted`, `RequestRejected`, and `CommitSucceeded` debug events from the server-authoritative path.
+In standalone or on the listen server host, a valid granted self-heal ability resolves the owner, applies the heal, and returns `Success`. On a remote client, the local call returns `RequestSentToServer`, then the owning client receives the authoritative target, effect, and commit debug events from the server-authoritative path.

@@ -5,6 +5,8 @@
 #include "Debug/MABSAbilitySystemLogs.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/MABSInstantEffectReceiver.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -15,10 +17,14 @@ namespace MABSAbilityComponentEventNames
 	static const FName AbilityGrantRejected(TEXT("AbilityGrantRejected"));
 	static const FName AbilityUnblocked(TEXT("AbilityUnblocked"));
 	static const FName CommitSucceeded(TEXT("CommitSucceeded"));
+	static const FName EffectApplied(TEXT("EffectApplied"));
+	static const FName EffectApplicationFailed(TEXT("EffectApplicationFailed"));
 	static const FName RequestAccepted(TEXT("RequestAccepted"));
 	static const FName RequestRejected(TEXT("RequestRejected"));
 	static const FName RequestSentToServer(TEXT("RequestSentToServer"));
 	static const FName RequestStarted(TEXT("RequestStarted"));
+	static const FName TargetResolved(TEXT("TargetResolved"));
+	static const FName TargetResolutionFailed(TEXT("TargetResolutionFailed"));
 }
 
 namespace
@@ -42,8 +48,47 @@ namespace
 		case EMABSAbilityActivationResult::AuthorityRejected:
 			return TEXT("Activation rejected because the request must be handled by authority.");
 
+		case EMABSAbilityActivationResult::TargetResolutionFailed:
+			return TEXT("Activation rejected because no valid target could be resolved.");
+
+		case EMABSAbilityActivationResult::EffectApplicationFailed:
+			return TEXT("Activation rejected because the instant effect could not be applied.");
+
 		default:
 			return TEXT("Activation rejected.");
+		}
+	}
+
+	FString GetTargetTypeLabel(const EMABSTargetType TargetType)
+	{
+		switch (TargetType)
+		{
+		case EMABSTargetType::Self:
+			return TEXT("Self");
+
+		case EMABSTargetType::Actor:
+			return TEXT("Actor");
+
+		case EMABSTargetType::Location:
+			return TEXT("Location");
+
+		default:
+			return TEXT("None");
+		}
+	}
+
+	FString GetInstantEffectTypeLabel(const EMABSInstantEffectType EffectType)
+	{
+		switch (EffectType)
+		{
+		case EMABSInstantEffectType::Damage:
+			return TEXT("Damage");
+
+		case EMABSInstantEffectType::Heal:
+			return TEXT("Heal");
+
+		default:
+			return TEXT("None");
 		}
 	}
 
@@ -359,8 +404,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(con
 		EmitDebugEventToOwningClient(AcceptedEvent);
 	}
 
-	CommitAbility(*AbilitySpec, bNotifyOwningClient);
-	return EMABSAbilityActivationResult::Success;
+	return CommitAbility(*AbilitySpec, bNotifyOwningClient);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMABSAbilitySpec& AbilitySpec) const
@@ -371,6 +415,24 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 	}
 
 	if (AbilitySpec.AbilityDefinition->AbilityTag != AbilitySpec.AbilityTag)
+	{
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	if (AbilitySpec.AbilityDefinition->TargetType != EMABSTargetType::Self
+		&& AbilitySpec.AbilityDefinition->TargetType != EMABSTargetType::Actor)
+	{
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	if (AbilitySpec.AbilityDefinition->InstantEffectType == EMABSInstantEffectType::None
+		|| AbilitySpec.AbilityDefinition->EffectMagnitude <= 0.0f)
+	{
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	if (AbilitySpec.AbilityDefinition->TargetType == EMABSTargetType::Actor
+		&& AbilitySpec.AbilityDefinition->TargetTraceDistance <= 0.0f)
 	{
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
@@ -388,10 +450,79 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 	return EMABSAbilityActivationResult::Success;
 }
 
-void UMABSAbilityComponent::CommitAbility(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
+EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
 {
+	FString TargetDebugMessage;
+	AActor* const TargetActor = ResolveAbilityTarget(AbilitySpec, TargetDebugMessage);
+	if (TargetActor == nullptr)
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::TargetResolutionFailed;
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::TargetResolutionFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::TargetResolutionFailed,
+			TargetDebugMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		return EMABSAbilityActivationResult::TargetResolutionFailed;
+	}
+
+	const FMABSAbilityDebugEvent TargetResolvedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::TargetResolved,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		TargetDebugMessage);
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(TargetResolvedEvent);
+	}
+
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
+
+	FString EffectDebugMessage;
+	const EMABSAbilityActivationResult EffectResult = ApplyInstantEffect(AbilitySpec, TargetActor, EffectDebugMessage);
+	if (EffectResult != EMABSAbilityActivationResult::Success)
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = EffectResult;
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::EffectApplicationFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EffectResult,
+			EffectDebugMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		return EffectResult;
+	}
+
 	AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::Success;
+
+	const FMABSAbilityDebugEvent EffectAppliedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::EffectApplied,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		EffectDebugMessage);
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(EffectAppliedEvent);
+	}
 
 	const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::CommitSucceeded,
@@ -413,6 +544,153 @@ void UMABSAbilityComponent::CommitAbility(FMABSAbilitySpec& AbilitySpec, const b
 	else
 	{
 		ResetAbilityToIdle(AbilitySpec.Handle);
+	}
+
+	return EMABSAbilityActivationResult::Success;
+}
+
+AActor* UMABSAbilityComponent::ResolveAbilityTarget(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	AActor* const Owner = GetOwner();
+	if (AbilityDefinition == nullptr || Owner == nullptr)
+	{
+		OutDebugMessage = TEXT("Failed to resolve a target because the ability definition or owning actor was invalid.");
+		return nullptr;
+	}
+
+	switch (AbilityDefinition->TargetType)
+	{
+	case EMABSTargetType::Self:
+		OutDebugMessage = FString::Printf(
+			TEXT("Resolved target '%s' using target type '%s'."),
+			*GetNameSafe(Owner),
+			*GetTargetTypeLabel(AbilityDefinition->TargetType));
+		return Owner;
+
+	case EMABSTargetType::Actor:
+		{
+			UWorld* const World = GetWorld();
+			if (World == nullptr)
+			{
+				OutDebugMessage = TEXT("Failed to resolve an actor target because the world was unavailable.");
+				return nullptr;
+			}
+
+			FVector TraceStart = Owner->GetActorLocation();
+			FRotator TraceRotation = Owner->GetActorRotation();
+			Owner->GetActorEyesViewPoint(TraceStart, TraceRotation);
+
+			const FVector TraceEnd = TraceStart + (TraceRotation.Vector() * AbilityDefinition->TargetTraceDistance);
+			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MABSAbilityTargetTrace), false);
+			QueryParams.AddIgnoredActor(Owner);
+
+			FHitResult HitResult;
+			const bool bHit = World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
+			AActor* const HitActor = bHit ? HitResult.GetActor() : nullptr;
+			if (HitActor == nullptr)
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Failed to resolve an actor target using target type '%s' within %.0f units."),
+					*GetTargetTypeLabel(AbilityDefinition->TargetType),
+					AbilityDefinition->TargetTraceDistance);
+				return nullptr;
+			}
+
+			OutDebugMessage = FString::Printf(
+				TEXT("Resolved target '%s' using target type '%s'."),
+				*GetNameSafe(HitActor),
+				*GetTargetTypeLabel(AbilityDefinition->TargetType));
+			return HitActor;
+		}
+
+	default:
+		OutDebugMessage = FString::Printf(
+			TEXT("Failed to resolve a target because target type '%s' is not supported in Phase 2."),
+			*GetTargetTypeLabel(AbilityDefinition->TargetType));
+		return nullptr;
+	}
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
+	const FMABSAbilitySpec& AbilitySpec,
+	AActor* TargetActor,
+	FString& OutDebugMessage) const
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	AActor* const Owner = GetOwner();
+	if (AbilityDefinition == nullptr || Owner == nullptr || TargetActor == nullptr)
+	{
+		OutDebugMessage = TEXT("Failed to apply the instant effect because the ability definition, owner, or target was invalid.");
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
+	}
+
+	switch (AbilityDefinition->InstantEffectType)
+	{
+	case EMABSInstantEffectType::Damage:
+		{
+			const float AppliedDamage = UGameplayStatics::ApplyDamage(
+				TargetActor,
+				AbilityDefinition->EffectMagnitude,
+				Owner->GetInstigatorController(),
+				Owner,
+				UDamageType::StaticClass());
+
+			if (AppliedDamage <= 0.0f)
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Failed to apply instant effect '%s' to '%s'."),
+					*GetInstantEffectTypeLabel(AbilityDefinition->InstantEffectType),
+					*GetNameSafe(TargetActor));
+				return EMABSAbilityActivationResult::EffectApplicationFailed;
+			}
+
+			OutDebugMessage = FString::Printf(
+				TEXT("Applied instant effect '%s' with magnitude %.2f to '%s'."),
+				*GetInstantEffectTypeLabel(AbilityDefinition->InstantEffectType),
+				AppliedDamage,
+				*GetNameSafe(TargetActor));
+			return EMABSAbilityActivationResult::Success;
+		}
+
+	case EMABSInstantEffectType::Heal:
+		{
+			if (!TargetActor->GetClass()->ImplementsInterface(UMABSInstantEffectReceiver::StaticClass()))
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Failed to apply instant effect '%s' to '%s' because the target does not implement IMABSInstantEffectReceiver."),
+					*GetInstantEffectTypeLabel(AbilityDefinition->InstantEffectType),
+					*GetNameSafe(TargetActor));
+				return EMABSAbilityActivationResult::EffectApplicationFailed;
+			}
+
+			const bool bAppliedHeal = IMABSInstantEffectReceiver::Execute_ApplyMABSHeal(
+				TargetActor,
+				AbilityDefinition->EffectMagnitude,
+				Owner,
+				AbilitySpec.AbilityDefinition);
+			if (!bAppliedHeal)
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Failed to apply instant effect '%s' to '%s' because the target rejected the heal."),
+					*GetInstantEffectTypeLabel(AbilityDefinition->InstantEffectType),
+					*GetNameSafe(TargetActor));
+				return EMABSAbilityActivationResult::EffectApplicationFailed;
+			}
+
+			OutDebugMessage = FString::Printf(
+				TEXT("Applied instant effect '%s' with magnitude %.2f to '%s'."),
+				*GetInstantEffectTypeLabel(AbilityDefinition->InstantEffectType),
+				AbilityDefinition->EffectMagnitude,
+				*GetNameSafe(TargetActor));
+			return EMABSAbilityActivationResult::Success;
+		}
+
+	default:
+		OutDebugMessage = FString::Printf(
+			TEXT("Failed to apply the instant effect because effect type '%s' is not supported in Phase 2."),
+			*GetInstantEffectTypeLabel(AbilityDefinition->InstantEffectType));
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
 	}
 }
 

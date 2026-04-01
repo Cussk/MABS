@@ -4,12 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Interfaces/MABSInstantEffectReceiver.h"
 #include "Logging/LogMacros.h"
 #include "MABSCharacter.generated.h"
 
 class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
+class UMABSAbilityDefinition;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -19,7 +21,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
  *  Implements a controllable orbiting camera
  */
 UCLASS(abstract)
-class AMABSCharacter : public ACharacter
+class AMABSCharacter : public ACharacter, public IMABSInstantEffectReceiver
 {
 	GENERATED_BODY()
 
@@ -32,6 +34,12 @@ class AMABSCharacter : public ACharacter
 	UCameraComponent* FollowCamera;
 	
 protected:
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MABS|Example", meta=(ClampMin="1.0"))
+	float MaxExampleHealth = 100.0f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Example")
+	float CurrentExampleHealth = 100.0f;
 
 	/** Jump Input Action */
 	UPROPERTY(EditAnywhere, Category="Input")
@@ -55,6 +63,8 @@ public:
 	AMABSCharacter();	
 
 protected:
+
+	virtual void BeginPlay() override;
 
 	/** Initialize input action bindings */
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -84,6 +94,13 @@ public:
 	/** Handles jump pressed inputs from either controls or UI interfaces */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoJumpEnd();
+
+	UFUNCTION(BlueprintPure, Category="MABS|Example")
+	float GetExampleHealthNormalized() const;
+
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
+
+	virtual bool ApplyMABSHeal_Implementation(float HealAmount, AActor* SourceActor, UMABSAbilityDefinition* SourceAbility) override;
 
 public:
 

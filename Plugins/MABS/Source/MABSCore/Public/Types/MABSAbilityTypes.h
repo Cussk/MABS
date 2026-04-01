@@ -18,7 +18,9 @@ enum class EMABSAbilityActivationResult : uint8
 	NotGranted UMETA(DisplayName="Not Granted"),
 	AlreadyActive UMETA(DisplayName="Already Active"),
 	Blocked UMETA(DisplayName="Blocked"),
-	AuthorityRejected UMETA(DisplayName="Authority Rejected")
+	AuthorityRejected UMETA(DisplayName="Authority Rejected"),
+	TargetResolutionFailed UMETA(DisplayName="Target Resolution Failed"),
+	EffectApplicationFailed UMETA(DisplayName="Effect Application Failed")
 };
 
 UENUM(BlueprintType)
@@ -44,6 +46,14 @@ enum class EMABSAbilityActivationPolicy : uint8
 {
 	OnInputTriggered UMETA(DisplayName="On Input Triggered"),
 	Passive UMETA(DisplayName="Passive")
+};
+
+UENUM(BlueprintType)
+enum class EMABSInstantEffectType : uint8
+{
+	None UMETA(DisplayName="None"),
+	Damage UMETA(DisplayName="Damage"),
+	Heal UMETA(DisplayName="Heal")
 };
 
 USTRUCT(BlueprintType)

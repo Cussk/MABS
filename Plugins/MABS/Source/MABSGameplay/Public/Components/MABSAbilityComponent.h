@@ -66,7 +66,14 @@ private:
 
 	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec) const;
 
-	void CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+	EMABSAbilityActivationResult CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+
+	AActor* ResolveAbilityTarget(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const;
+
+	EMABSAbilityActivationResult ApplyInstantEffect(
+		const FMABSAbilitySpec& AbilitySpec,
+		AActor* TargetActor,
+		FString& OutDebugMessage) const;
 
 	FMABSAbilitySpec* FindGrantedAbilitySpecByTagMutable(const FGameplayTag& AbilityTag);
 

@@ -27,6 +27,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	EMABSTargetType TargetType = EMABSTargetType::Self;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
+	EMABSInstantEffectType InstantEffectType = EMABSInstantEffectType::None;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))
+	float EffectMagnitude = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))
+	float TargetTraceDistance = 1500.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))
 	float CooldownSeconds = 0.0f;
 

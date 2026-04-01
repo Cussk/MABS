@@ -42,6 +42,13 @@ enum class EMABSTargetType : uint8
 };
 
 UENUM(BlueprintType)
+enum class EMABSTargetTraceMode : uint8
+{
+	Line UMETA(DisplayName="Line"),
+	Sphere UMETA(DisplayName="Sphere")
+};
+
+UENUM(BlueprintType)
 enum class EMABSAbilityActivationPolicy : uint8
 {
 	OnInputTriggered UMETA(DisplayName="On Input Triggered"),

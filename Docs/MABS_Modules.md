@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the Phase 2 module layout for MABS and what each module owns.
+This document explains the current module layout for MABS and what each module owns after Phase 2.5 targeting polish and runtime debug visibility.
 
 ## Why it exists
 
-Phase 01 proved the grant-and-activate flow. Phase 1.5 reorganized that flow into a plugin-first layout. Phase 2 keeps that structure and adds targeting and instant effects without collapsing responsibilities back together.
+Phase 01 proved the grant-and-activate flow. Phase 1.5 reorganized that flow into a plugin-first layout. Phase 2 added targeting and instant effects. Phase 2.5 keeps those layers separate while improving targeting behavior and adding runtime debugging without collapsing everything into one module.
 
 ## Module map
 
@@ -24,12 +24,12 @@ Why it exists:
 How to use it:
 
 * create `UMABSAbilityDefinition` assets
-* read `FMABSAbilitySpec` and `FMABSAbilityDebugEvent`
-* use shared enums such as `EMABSTargetType` and `EMABSInstantEffectType`
+* read `FMABSAbilitySpec`, `FMABSAbilityDebugEvent`, and `FMABSTargetTraceDebugInfo`
+* use shared enums such as `EMABSTargetType`, `EMABSTargetTraceMode`, and `EMABSInstantEffectType`
 
 Example:
 
-* a designer-authored self-heal asset lives entirely in `MABSCore` data
+* a designer-authored fireball asset stores its target trace mode, radius, and debug-draw settings in `MABSCore` data
 
 ### `MABSGameplay`
 
@@ -40,18 +40,19 @@ What it is:
 Why it exists:
 
 * it owns the server-authoritative execution path
-* it keeps grant, activation, target resolution, effect application, and replication together
+* it keeps grant, activation, target resolution, target validation, effect application, and replication together
 
 How to use it:
 
 * add `UMABSAbilityComponent` to an actor or character
 * grant abilities on authority
 * call `TryActivateAbilityByTag`
+* read `GetLatestTargetTraceDebugInfo()` when you need the newest authoritative actor-target trace result
 * optionally implement `IMABSInstantEffectReceiver` on actors that should accept MABS heals
 
 Example:
 
-* a player character component grants `Test.Ability.SelfHeal` on the server, then activates it from input and heals the owner
+* a player character component grants `Test.Ability.Fireball`, runs a sphere trace from the controller viewpoint, validates the hit actor, stores the latest trace snapshot, and applies damage on authority
 
 ### `MABSDebug`
 
@@ -62,16 +63,16 @@ What it is:
 Why it exists:
 
 * it keeps debug consumers out of the core gameplay execution path
-* it provides a place for helper libraries and future runtime-safe overlays
+* it provides a place for formatting helpers and the first lightweight runtime overlay
 
 How to use it:
 
-* consume `FMABSAbilityDebugEvent`
-* format events with `UMABSDebugBlueprintLibrary::FormatAbilityDebugEvent`
+* format `FMABSAbilityDebugEvent` and `FMABSTargetTraceDebugInfo`
+* use `AMABSDebugHUD` for a simple recent-events and latest-trace overlay
 
 Example:
 
-* a Blueprint HUD or PIE test harness formats the latest target/effect debug event into a readable string
+* the Third Person host harness uses `AMABSDebugHUD` to show the newest trace result and recent MABS events in PIE
 
 ### `MABSEditor`
 
@@ -91,18 +92,18 @@ How to use it:
 
 ## Dependency direction
 
-Allowed dependency flow is:
+Current dependency flow is:
 
 * `MABSCore` depends on no other MABS modules
 * `MABSGameplay` depends on `MABSCore`
-* `MABSDebug` depends on `MABSCore`
+* `MABSDebug` depends on `MABSCore` and consumes `MABSGameplay` data for the runtime overlay
 * `MABSEditor` may depend on runtime modules
 
 This keeps runtime code one-way and prevents editor dependencies from leaking into game or server targets.
 
 ## Host project versus plugin content
 
-Phase 2 still separates the reusable plugin from the local development harness.
+The plugin remains the reusable runtime product. The host project still contains the local verification harness.
 
 Current host-project-only items include:
 
@@ -110,13 +111,15 @@ Current host-project-only items include:
 * `Content/Data/DA_Test_Fireball.uasset`
 * Third Person Blueprint wiring used for local verification
 * the example heal receiver state on `AMABSCharacter`
+* the default `AMABSGameMode` wiring that opts into `AMABSDebugHUD`
 
 Current plugin runtime responsibility includes:
 
 * reusable code modules only
 * shared runtime types and ability definitions
 * runtime ability execution
-* runtime-safe debug helpers
+* runtime-safe debug formatting helpers
+* the reusable debug HUD overlay
 
 ## Example integration
 
@@ -124,4 +127,4 @@ Current plugin runtime responsibility includes:
 2. Create a `UMABSAbilityDefinition` asset in content.
 3. Add `UMABSAbilityComponent` to a character.
 4. Grant the ability on authority.
-5. Activate by tag and inspect debug events for target and effect steps.
+5. Activate by tag and inspect recent debug events and the latest trace snapshot through the overlay or Blueprint helpers.

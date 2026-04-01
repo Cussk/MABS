@@ -1,10 +1,14 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Components/MABSAbilityComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Data/MABSAbilityDefinition.h"
 #include "Debug/MABSAbilitySystemLogs.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
 #include "Interfaces/MABSInstantEffectReceiver.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -23,6 +27,9 @@ namespace MABSAbilityComponentEventNames
 	static const FName RequestRejected(TEXT("RequestRejected"));
 	static const FName RequestSentToServer(TEXT("RequestSentToServer"));
 	static const FName RequestStarted(TEXT("RequestStarted"));
+	static const FName TargetTraceHit(TEXT("TargetTraceHit"));
+	static const FName TargetTraceRejected(TEXT("TargetTraceRejected"));
+	static const FName TargetTraceStarted(TEXT("TargetTraceStarted"));
 	static const FName TargetResolved(TEXT("TargetResolved"));
 	static const FName TargetResolutionFailed(TEXT("TargetResolutionFailed"));
 }
@@ -77,6 +84,18 @@ namespace
 		}
 	}
 
+	FString GetTargetTraceModeLabel(const EMABSTargetTraceMode TraceMode)
+	{
+		switch (TraceMode)
+		{
+		case EMABSTargetTraceMode::Sphere:
+			return TEXT("Sphere");
+
+		default:
+			return TEXT("Line");
+		}
+	}
+
 	FString GetInstantEffectTypeLabel(const EMABSInstantEffectType EffectType)
 	{
 		switch (EffectType)
@@ -102,6 +121,33 @@ namespace
 		return AbilityDefinition->DisplayName.IsEmpty()
 			? GetNameSafe(AbilityDefinition)
 			: AbilityDefinition->DisplayName.ToString();
+	}
+
+	FString FormatVectorForDebug(const FVector& Vector)
+	{
+		return FString::Printf(TEXT("(X=%.0f Y=%.0f Z=%.0f)"), Vector.X, Vector.Y, Vector.Z);
+	}
+
+	FString GetHitActorLabel(const AActor* Actor)
+	{
+		return Actor != nullptr ? GetNameSafe(Actor) : TEXT("World");
+	}
+
+	FCollisionObjectQueryParams MakeTargetTraceObjectQueryParams(const UMABSAbilityDefinition& AbilityDefinition)
+	{
+		FCollisionObjectQueryParams ObjectQueryParams;
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_Vehicle);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_Destructible);
+
+		if (!AbilityDefinition.bIgnoreNonTargetWorldHits)
+		{
+			ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		}
+
+		return ObjectQueryParams;
 	}
 }
 
@@ -315,6 +361,11 @@ TArray<FMABSAbilityDebugEvent> UMABSAbilityComponent::GetRecentDebugEvents() con
 	return RecentDebugEvents;
 }
 
+FMABSTargetTraceDebugInfo UMABSAbilityComponent::GetLatestTargetTraceDebugInfo() const
+{
+	return LatestTargetTraceDebugInfo;
+}
+
 void UMABSAbilityComponent::ServerTryActivateAbilityByTag_Implementation(const FGameplayTag AbilityTag)
 {
 	HandleTryActivateAbility(AbilityTag, true);
@@ -323,6 +374,11 @@ void UMABSAbilityComponent::ServerTryActivateAbilityByTag_Implementation(const F
 void UMABSAbilityComponent::ClientReceiveAbilityDebugEvent_Implementation(const FMABSAbilityDebugEvent& DebugEvent)
 {
 	RecordDebugEvent(DebugEvent);
+}
+
+void UMABSAbilityComponent::ClientReceiveTargetTraceDebugInfo_Implementation(const FMABSTargetTraceDebugInfo& DebugInfo)
+{
+	RecordLatestTargetTraceDebugInfo(DebugInfo);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(const FGameplayTag& AbilityTag, const bool bNotifyOwningClient)
@@ -437,6 +493,13 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
+	if (AbilitySpec.AbilityDefinition->TargetType == EMABSTargetType::Actor
+		&& AbilitySpec.AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
+		&& AbilitySpec.AbilityDefinition->TargetTraceRadius <= 0.0f)
+	{
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
 	if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Active)
 	{
 		return EMABSAbilityActivationResult::AlreadyActive;
@@ -452,8 +515,10 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 
 EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
 {
+	ClearLatestTargetTraceDebugInfo(bNotifyOwningClient);
+
 	FString TargetDebugMessage;
-	AActor* const TargetActor = ResolveAbilityTarget(AbilitySpec, TargetDebugMessage);
+	AActor* const TargetActor = ResolveAbilityTarget(AbilitySpec, TargetDebugMessage, bNotifyOwningClient);
 	if (TargetActor == nullptr)
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
@@ -549,7 +614,10 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 	return EMABSAbilityActivationResult::Success;
 }
 
-AActor* UMABSAbilityComponent::ResolveAbilityTarget(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const
+AActor* UMABSAbilityComponent::ResolveAbilityTarget(
+	const FMABSAbilitySpec& AbilitySpec,
+	FString& OutDebugMessage,
+	const bool bNotifyOwningClient)
 {
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
 	AActor* const Owner = GetOwner();
@@ -577,31 +645,222 @@ AActor* UMABSAbilityComponent::ResolveAbilityTarget(const FMABSAbilitySpec& Abil
 				return nullptr;
 			}
 
-			FVector TraceStart = Owner->GetActorLocation();
-			FRotator TraceRotation = Owner->GetActorRotation();
-			Owner->GetActorEyesViewPoint(TraceStart, TraceRotation);
-
-			const FVector TraceEnd = TraceStart + (TraceRotation.Vector() * AbilityDefinition->TargetTraceDistance);
-			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MABSAbilityTargetTrace), false);
-			QueryParams.AddIgnoredActor(Owner);
-
-			FHitResult HitResult;
-			const bool bHit = World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
-			AActor* const HitActor = bHit ? HitResult.GetActor() : nullptr;
-			if (HitActor == nullptr)
+			FVector TraceStart = FVector::ZeroVector;
+			FRotator TraceRotation = FRotator::ZeroRotator;
+			FString ViewPointDescription;
+			if (!GetTargetTraceViewPoint(TraceStart, TraceRotation, ViewPointDescription))
 			{
-				OutDebugMessage = FString::Printf(
-					TEXT("Failed to resolve an actor target using target type '%s' within %.0f units."),
-					*GetTargetTypeLabel(AbilityDefinition->TargetType),
-					AbilityDefinition->TargetTraceDistance);
+				OutDebugMessage = TEXT("Failed to resolve an actor target because the trace viewpoint was unavailable.");
 				return nullptr;
 			}
 
-			OutDebugMessage = FString::Printf(
-				TEXT("Resolved target '%s' using target type '%s'."),
-				*GetNameSafe(HitActor),
-				*GetTargetTypeLabel(AbilityDefinition->TargetType));
-			return HitActor;
+			FMABSTargetTraceDebugInfo TraceDebugInfo;
+			TraceDebugInfo.bHasTraceData = true;
+			TraceDebugInfo.AbilityTag = AbilitySpec.AbilityTag;
+			TraceDebugInfo.AbilityHandle = AbilitySpec.Handle;
+			TraceDebugInfo.TraceMode = AbilityDefinition->ActorTargetTraceMode;
+			FVector GameplayTraceStart = TraceStart;
+			FRotator UnusedTraceRotation = TraceRotation;
+			Owner->GetActorEyesViewPoint(GameplayTraceStart, UnusedTraceRotation);
+
+			TraceDebugInfo.TraceStart = GameplayTraceStart;
+			TraceDebugInfo.TraceEnd = GameplayTraceStart + (TraceRotation.Vector() * AbilityDefinition->TargetTraceDistance);
+			TraceDebugInfo.TraceRadius = AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
+				? AbilityDefinition->TargetTraceRadius
+				: 0.0f;
+			TraceDebugInfo.WorldTimeSeconds = World->GetTimeSeconds();
+			TraceDebugInfo.ViewPointDescription = FString::Printf(
+				TEXT("%sAim + OwnerEyesStart"),
+				*ViewPointDescription);
+
+			const FString TraceStartedMessage = FString::Printf(
+				TEXT("Started %s target trace from %s to %s using viewpoint '%s' with distance %.0f and radius %.0f."),
+				*GetTargetTraceModeLabel(TraceDebugInfo.TraceMode),
+				*FormatVectorForDebug(TraceDebugInfo.TraceStart),
+				*FormatVectorForDebug(TraceDebugInfo.TraceEnd),
+				*TraceDebugInfo.ViewPointDescription,
+				AbilityDefinition->TargetTraceDistance,
+				TraceDebugInfo.TraceRadius);
+			const FMABSAbilityDebugEvent TraceStartedEvent = EmitDebugEvent(
+				MABSAbilityComponentEventNames::TargetTraceStarted,
+				AbilitySpec.AbilityTag,
+				AbilitySpec.Handle,
+				AbilitySpec.RuntimeState,
+				EMABSAbilityActivationResult::Success,
+				TraceStartedMessage);
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(TraceStartedEvent);
+			}
+
+			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MABSAbilityTargetTrace), false);
+			QueryParams.AddIgnoredActor(Owner);
+			const FCollisionObjectQueryParams ObjectQueryParams = MakeTargetTraceObjectQueryParams(*AbilityDefinition);
+
+			TArray<FHitResult> HitResults;
+			if (AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
+				&& AbilityDefinition->TargetTraceRadius > 0.0f)
+			{
+				const FCollisionShape TraceShape = FCollisionShape::MakeSphere(AbilityDefinition->TargetTraceRadius);
+				World->SweepMultiByObjectType(
+					HitResults,
+					TraceDebugInfo.TraceStart,
+					TraceDebugInfo.TraceEnd,
+					TraceRotation.Quaternion(),
+					ObjectQueryParams,
+					TraceShape,
+					QueryParams);
+			}
+			else
+			{
+				World->LineTraceMultiByObjectType(
+					HitResults,
+					TraceDebugInfo.TraceStart,
+					TraceDebugInfo.TraceEnd,
+					ObjectQueryParams,
+					QueryParams);
+			}
+
+			if (HitResults.IsEmpty())
+			{
+				TraceDebugInfo.ResultMessage = FString::Printf(
+					TEXT("Target trace found no blocking hit within %.0f units."),
+					AbilityDefinition->TargetTraceDistance);
+				RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+				if (bNotifyOwningClient)
+				{
+					EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+				}
+				DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+				OutDebugMessage = TraceDebugInfo.ResultMessage;
+				return nullptr;
+			}
+
+			for (const FHitResult& HitResult : HitResults)
+			{
+				AActor* const HitActor = HitResult.GetActor();
+				TraceDebugInfo.bHit = true;
+				TraceDebugInfo.HitLocation = HitResult.ImpactPoint;
+				TraceDebugInfo.HitDistance = FVector::Distance(TraceDebugInfo.TraceStart, HitResult.ImpactPoint);
+				TraceDebugInfo.HitActorName = GetHitActorLabel(HitActor);
+				TraceDebugInfo.HitComponentName = GetNameSafe(HitResult.GetComponent());
+				TraceDebugInfo.WorldTimeSeconds = World->GetTimeSeconds();
+
+				if (HitActor == nullptr)
+				{
+					TraceDebugInfo.bAcceptedTarget = false;
+					TraceDebugInfo.ResultMessage = AbilityDefinition->bIgnoreNonTargetWorldHits
+						? FString::Printf(
+							TEXT("Rejected world hit on component '%s' at %.0f units and continued searching for a valid actor target."),
+							*TraceDebugInfo.HitComponentName,
+							TraceDebugInfo.HitDistance)
+						: FString::Printf(
+							TEXT("Rejected world hit on component '%s' at %.0f units because non-target world hits are not ignored."),
+							*TraceDebugInfo.HitComponentName,
+							TraceDebugInfo.HitDistance);
+
+					const FMABSAbilityDebugEvent TraceRejectedEvent = EmitDebugEvent(
+						MABSAbilityComponentEventNames::TargetTraceRejected,
+						AbilitySpec.AbilityTag,
+						AbilitySpec.Handle,
+						AbilitySpec.RuntimeState,
+						EMABSAbilityActivationResult::TargetResolutionFailed,
+						TraceDebugInfo.ResultMessage);
+					if (bNotifyOwningClient)
+					{
+						EmitDebugEventToOwningClient(TraceRejectedEvent);
+					}
+
+					RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+					if (bNotifyOwningClient)
+					{
+						EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+					}
+					if (AbilityDefinition->bIgnoreNonTargetWorldHits)
+					{
+						continue;
+					}
+
+					DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+					OutDebugMessage = TraceDebugInfo.ResultMessage;
+					return nullptr;
+				}
+
+				FString RejectionReason;
+				if (!ValidateResolvedTargetActor(AbilitySpec, HitActor, RejectionReason))
+				{
+					TraceDebugInfo.bAcceptedTarget = false;
+					TraceDebugInfo.ResultMessage = FString::Printf(
+						TEXT("Rejected actor target '%s' on component '%s' at %.0f units: %s"),
+						*TraceDebugInfo.HitActorName,
+						*TraceDebugInfo.HitComponentName,
+						TraceDebugInfo.HitDistance,
+						*RejectionReason);
+
+					const FMABSAbilityDebugEvent TraceRejectedEvent = EmitDebugEvent(
+						MABSAbilityComponentEventNames::TargetTraceRejected,
+						AbilitySpec.AbilityTag,
+						AbilitySpec.Handle,
+						AbilitySpec.RuntimeState,
+						EMABSAbilityActivationResult::TargetResolutionFailed,
+						TraceDebugInfo.ResultMessage);
+					if (bNotifyOwningClient)
+					{
+						EmitDebugEventToOwningClient(TraceRejectedEvent);
+					}
+
+					RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+					if (bNotifyOwningClient)
+					{
+						EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+					}
+					DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+					OutDebugMessage = TraceDebugInfo.ResultMessage;
+					return nullptr;
+				}
+
+				TraceDebugInfo.bAcceptedTarget = true;
+				TraceDebugInfo.ResultMessage = FString::Printf(
+					TEXT("Accepted actor target '%s' on component '%s' at %.0f units using %s trace."),
+					*TraceDebugInfo.HitActorName,
+					*TraceDebugInfo.HitComponentName,
+					TraceDebugInfo.HitDistance,
+					*GetTargetTraceModeLabel(TraceDebugInfo.TraceMode));
+
+				const FMABSAbilityDebugEvent TraceHitEvent = EmitDebugEvent(
+					MABSAbilityComponentEventNames::TargetTraceHit,
+					AbilitySpec.AbilityTag,
+					AbilitySpec.Handle,
+					AbilitySpec.RuntimeState,
+					EMABSAbilityActivationResult::Success,
+					TraceDebugInfo.ResultMessage);
+				if (bNotifyOwningClient)
+				{
+					EmitDebugEventToOwningClient(TraceHitEvent);
+				}
+
+				RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+				if (bNotifyOwningClient)
+				{
+					EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+				}
+				DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+				OutDebugMessage = FString::Printf(
+					TEXT("Resolved target '%s' using target type '%s'. %s"),
+					*GetNameSafe(HitActor),
+					*GetTargetTypeLabel(AbilityDefinition->TargetType),
+					*TraceDebugInfo.ResultMessage);
+				return HitActor;
+			}
+
+			DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+			OutDebugMessage = TraceDebugInfo.ResultMessage.IsEmpty()
+				? FString::Printf(
+					TEXT("Failed to resolve an actor target using target type '%s' within %.0f units."),
+					*GetTargetTypeLabel(AbilityDefinition->TargetType),
+					AbilityDefinition->TargetTraceDistance)
+				: TraceDebugInfo.ResultMessage;
+			return nullptr;
 		}
 
 	default:
@@ -816,6 +1075,185 @@ void UMABSAbilityComponent::EmitDebugEventToOwningClient(const FMABSAbilityDebug
 	}
 
 	ClientReceiveAbilityDebugEvent(DebugEvent);
+}
+
+void UMABSAbilityComponent::RecordLatestTargetTraceDebugInfo(const FMABSTargetTraceDebugInfo& DebugInfo)
+{
+	LatestTargetTraceDebugInfo = DebugInfo;
+}
+
+void UMABSAbilityComponent::EmitLatestTargetTraceDebugInfoToOwningClient(const FMABSTargetTraceDebugInfo& DebugInfo)
+{
+	AActor* Owner = GetOwner();
+	if (Owner == nullptr || Owner->GetNetOwningPlayer() == nullptr)
+	{
+		return;
+	}
+
+	ClientReceiveTargetTraceDebugInfo(DebugInfo);
+}
+
+void UMABSAbilityComponent::ClearLatestTargetTraceDebugInfo(const bool bNotifyOwningClient)
+{
+	const FMABSTargetTraceDebugInfo ClearedDebugInfo;
+	RecordLatestTargetTraceDebugInfo(ClearedDebugInfo);
+	if (bNotifyOwningClient)
+	{
+		EmitLatestTargetTraceDebugInfoToOwningClient(ClearedDebugInfo);
+	}
+}
+
+bool UMABSAbilityComponent::GetTargetTraceViewPoint(
+	FVector& OutTraceStart,
+	FRotator& OutTraceRotation,
+	FString& OutViewPointDescription) const
+{
+	const AActor* Owner = GetOwner();
+	if (Owner == nullptr)
+	{
+		return false;
+	}
+
+	if (const APawn* OwnerPawn = Cast<APawn>(Owner))
+	{
+		if (const AController* OwnerController = OwnerPawn->GetController())
+		{
+			OwnerController->GetPlayerViewPoint(OutTraceStart, OutTraceRotation);
+			OutViewPointDescription = TEXT("ControllerViewPoint");
+			return true;
+		}
+	}
+
+	Owner->GetActorEyesViewPoint(OutTraceStart, OutTraceRotation);
+	OutViewPointDescription = TEXT("OwnerEyesViewPoint");
+	return true;
+}
+
+bool UMABSAbilityComponent::ValidateResolvedTargetActor(
+	const FMABSAbilitySpec& AbilitySpec,
+	const AActor* CandidateActor,
+	FString& OutRejectionReason) const
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	const AActor* const Owner = GetOwner();
+	if (AbilityDefinition == nullptr)
+	{
+		OutRejectionReason = TEXT("the ability definition was invalid.");
+		return false;
+	}
+
+	if (CandidateActor == nullptr)
+	{
+		OutRejectionReason = TEXT("the trace did not hit an actor.");
+		return false;
+	}
+
+	if (CandidateActor == Owner)
+	{
+		OutRejectionReason = TEXT("self actor hits are not valid for actor targeting.");
+		return false;
+	}
+
+	if (!AbilityDefinition->bRequireValidActorTarget)
+	{
+		return true;
+	}
+
+	switch (AbilityDefinition->InstantEffectType)
+	{
+	case EMABSInstantEffectType::Damage:
+		if (CandidateActor->CanBeDamaged() || CandidateActor->IsA<APawn>())
+		{
+			return true;
+		}
+
+		OutRejectionReason = TEXT("the actor is not damageable and is not a pawn.");
+		return false;
+
+	case EMABSInstantEffectType::Heal:
+		if (CandidateActor->GetClass()->ImplementsInterface(UMABSInstantEffectReceiver::StaticClass()))
+		{
+			return true;
+		}
+
+		OutRejectionReason = TEXT("the actor does not implement IMABSInstantEffectReceiver.");
+		return false;
+
+	default:
+		OutRejectionReason = TEXT("the authored instant effect type does not support actor validation.");
+		return false;
+	}
+}
+
+void UMABSAbilityComponent::DrawTargetTraceDebug(
+	const UMABSAbilityDefinition& AbilityDefinition,
+	const FMABSTargetTraceDebugInfo& DebugInfo) const
+{
+	if (!AbilityDefinition.bDrawTargetTraceDebug || !DebugInfo.bHasTraceData)
+	{
+		return;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	const FColor TraceColor = DebugInfo.bAcceptedTarget
+		? FColor::Green
+		: (DebugInfo.bHit ? FColor::Red : FColor::Yellow);
+
+	DrawDebugLine(
+		World,
+		DebugInfo.TraceStart,
+		DebugInfo.TraceEnd,
+		TraceColor,
+		false,
+		AbilityDefinition.TargetTraceDebugDuration,
+		0,
+		1.5f);
+
+	if (DebugInfo.TraceMode == EMABSTargetTraceMode::Sphere && DebugInfo.TraceRadius > 0.0f)
+	{
+		DrawDebugSphere(
+			World,
+			DebugInfo.TraceStart,
+			DebugInfo.TraceRadius,
+			16,
+			FColor::Cyan,
+			false,
+			AbilityDefinition.TargetTraceDebugDuration);
+
+		DrawDebugSphere(
+			World,
+			DebugInfo.TraceEnd,
+			DebugInfo.TraceRadius,
+			16,
+			FColor::Cyan,
+			false,
+			AbilityDefinition.TargetTraceDebugDuration);
+	}
+
+	if (DebugInfo.bHit)
+	{
+		DrawDebugPoint(
+			World,
+			DebugInfo.HitLocation,
+			18.0f,
+			TraceColor,
+			false,
+			AbilityDefinition.TargetTraceDebugDuration);
+
+		DrawDebugString(
+			World,
+			DebugInfo.HitLocation + FVector(0.0f, 0.0f, 24.0f),
+			DebugInfo.ResultMessage,
+			nullptr,
+			TraceColor,
+			AbilityDefinition.TargetTraceDebugDuration,
+			false);
+	}
 }
 
 bool UMABSAbilityComponent::CanMutateAbilityState() const

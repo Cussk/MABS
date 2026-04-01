@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains how Phase 2 handles multiplayer authority for activation, target resolution, and instant effect application.
+This document explains how Phase 2.5 handles multiplayer authority for activation, target resolution, instant effect application, and runtime debug visibility.
 
 ## Why it exists
 
-Ability systems are easy to make locally and easy to break in multiplayer. MABS keeps the activation decision, target resolution, and effect application on the server so later phases do not need to undo local-only assumptions.
+Ability systems are easy to make locally and easy to break in multiplayer. MABS keeps gameplay results on the server while still giving the owning client enough visibility to understand what the authority path did.
 
 ## Server authority
 
@@ -28,30 +28,47 @@ When a remote client calls `TryActivateAbilityByTag`:
 3. the local return value is `RequestSentToServer`
 4. the server validates, resolves the target, and applies the effect
 5. the server mirrors the authoritative debug events back to the owning client
+6. the server also mirrors the latest authoritative `FMABSTargetTraceDebugInfo` snapshot when actor targeting is used
 
 This keeps the final result authoritative while still giving the client visibility into what happened.
 
-## Targeting and effects in multiplayer
+## Targeting in multiplayer
 
 ### `Self`
 
 The server resolves the owner actor directly.
 
-This is the simplest Phase 2 path and is ideal for self-heal testing.
-
 ### `Actor`
 
-The server performs the forward trace from the owning actor and resolves a single actor target.
+The server performs the configured actor trace from the authoritative viewpoint, validates the hit result, and stores the latest trace snapshot.
 
-If the trace misses, the request fails cleanly with `TargetResolutionFailed`.
+Phase 2.5 improvements that matter in multiplayer:
+
+* configurable line or sphere traces
+* clearer rejection reasons
+* latest trace snapshot mirrored to the owning client
+* optional trace debug draw on the authority path
+
+## Effects in multiplayer
 
 ### Damage
 
-The server applies damage through Unreal's generic damage path.
+The server applies damage through Unreal’s generic damage path.
 
 ### Heal
 
-The server applies heal only if the target implements `IMABSInstantEffectReceiver`.
+The server applies heal only if the resolved target implements `IMABSInstantEffectReceiver`.
+
+## Runtime overlay in multiplayer
+
+`AMABSDebugHUD` is client-side runtime UI. It does not make gameplay decisions.
+
+It reads:
+
+* local recent debug events
+* the latest authoritative target trace snapshot for the local owner
+
+This keeps the overlay runtime-safe for standalone, listen server, and remote clients.
 
 ## Standalone, listen server, and dedicated server
 
@@ -67,41 +84,36 @@ The host player also uses the authority path directly. Remote clients on that se
 
 All player activation requests go to the dedicated server, which validates, resolves targets, applies effects, and sends debug results back to the owning client.
 
-## How to use it
-
-1. Grant abilities on the server.
-2. Call `TryActivateAbilityByTag` from client input or server gameplay code.
-3. Expect a local `RequestSentToServer` return value on remote clients.
-4. Use `OnAbilityDebugEvent` or logs to inspect the authoritative target and effect results.
-
 ## Example
 
 Example multiplayer verification flow:
 
 1. Start PIE with one listen server and one client.
-2. Grant `Test.Ability.SelfHeal` on the server-owned player character.
+2. Grant `Test.Ability.Fireball` on the server-owned player character.
 3. Press the bound activation input on the remote client.
 4. Verify the client records `RequestSentToServer`.
-5. Verify the server records `RequestAccepted`, `TargetResolved`, `EffectApplied`, and `CommitSucceeded`.
-6. Verify the client receives those authoritative events from the server.
+5. Verify the server records `TargetTraceStarted`, then `TargetTraceHit` or `TargetTraceRejected`.
+6. Verify the server applies the effect only on authority.
+7. Verify the client receives the final authoritative debug events and latest trace snapshot.
 
 ## Test checklist
 
 Singleplayer:
 
 * self-heal resolves the owner and succeeds
-* actor damage succeeds when a target actor is traced
-* actor damage fails cleanly when no actor is found
+* actor damage succeeds when a valid actor is traced
+* actor damage fails cleanly when no valid actor is found
 
 Listen server:
 
 * host self-heal succeeds through authority-local execution
 * host damage ability succeeds through authority-local execution
 * remote client uses the RPC path
-* remote client receives the final authoritative target/effect result
+* remote client receives the final authoritative target, effect, and trace-debug result
 
 Dedicated server:
 
 * remote client requests reach the server
 * the server resolves targets and applies effects correctly
 * there are no client-only targeting or effect shortcuts
+* the runtime overlay remains client-safe

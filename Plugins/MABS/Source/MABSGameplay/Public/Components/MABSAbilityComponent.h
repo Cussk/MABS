@@ -43,6 +43,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	TArray<FMABSAbilityDebugEvent> GetRecentDebugEvents() const;
 
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	FMABSTargetTraceDebugInfo GetLatestTargetTraceDebugInfo() const;
+
 protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Abilities", Transient, Replicated)
@@ -50,6 +53,9 @@ protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Debug", Transient)
 	TArray<FMABSAbilityDebugEvent> RecentDebugEvents;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Debug", Transient)
+	FMABSTargetTraceDebugInfo LatestTargetTraceDebugInfo;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MABS|Debug", meta=(ClampMin="1"))
 	int32 MaxStoredDebugEvents = 32;
@@ -62,13 +68,16 @@ private:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveAbilityDebugEvent(const FMABSAbilityDebugEvent& DebugEvent);
 
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveTargetTraceDebugInfo(const FMABSTargetTraceDebugInfo& DebugInfo);
+
 	EMABSAbilityActivationResult HandleTryActivateAbility(const FGameplayTag& AbilityTag, bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec) const;
 
 	EMABSAbilityActivationResult CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
-	AActor* ResolveAbilityTarget(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const;
+	AActor* ResolveAbilityTarget(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult ApplyInstantEffect(
 		const FMABSAbilitySpec& AbilitySpec,
@@ -102,6 +111,18 @@ private:
 		const FString& Message);
 
 	void EmitDebugEventToOwningClient(const FMABSAbilityDebugEvent& DebugEvent);
+
+	void RecordLatestTargetTraceDebugInfo(const FMABSTargetTraceDebugInfo& DebugInfo);
+
+	void EmitLatestTargetTraceDebugInfoToOwningClient(const FMABSTargetTraceDebugInfo& DebugInfo);
+
+	void ClearLatestTargetTraceDebugInfo(bool bNotifyOwningClient);
+
+	bool GetTargetTraceViewPoint(FVector& OutTraceStart, FRotator& OutTraceRotation, FString& OutViewPointDescription) const;
+
+	bool ValidateResolvedTargetActor(const FMABSAbilitySpec& AbilitySpec, const AActor* CandidateActor, FString& OutRejectionReason) const;
+
+	void DrawTargetTraceDebug(const UMABSAbilityDefinition& AbilityDefinition, const FMABSTargetTraceDebugInfo& DebugInfo) const;
 
 	bool CanMutateAbilityState() const;
 

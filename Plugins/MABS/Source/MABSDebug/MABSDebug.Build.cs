@@ -15,5 +15,11 @@ public class MABSDebug : ModuleRules
 				"GameplayTags",
 				"MABSCore"
 			});
+
+		PrivateDependencyModuleNames.AddRange(
+			new[]
+			{
+				"MABSGameplay"
+			});
 	}
 }

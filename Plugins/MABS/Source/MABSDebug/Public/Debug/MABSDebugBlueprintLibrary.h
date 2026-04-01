@@ -16,4 +16,13 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	static FString FormatAbilityDebugEvent(const FMABSAbilityDebugEvent& DebugEvent);
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	static FString FormatTargetTraceDebugInfo(const FMABSTargetTraceDebugInfo& DebugInfo);
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	static FLinearColor GetAbilityDebugEventColor(const FMABSAbilityDebugEvent& DebugEvent);
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	static FLinearColor GetTargetTraceDebugColor(const FMABSTargetTraceDebugInfo& DebugInfo);
 };

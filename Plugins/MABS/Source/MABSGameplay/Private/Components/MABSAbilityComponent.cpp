@@ -2,12 +2,18 @@
 
 #include "Components/MABSAbilityComponent.h"
 #include "Actors/MABSProjectileBase.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
 #include "Data/MABSAbilityDefinition.h"
 #include "Debug/MABSAbilitySystemLogs.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Interfaces/MABSCostReceiver.h"
@@ -36,19 +42,28 @@ namespace MABSAbilityComponentEventNames
 	static const FName HitTraceRejected(TEXT("HitTraceRejected"));
 	static const FName MeleeHit(TEXT("MeleeHit"));
 	static const FName MeleeRejected(TEXT("MeleeRejected"));
+	static const FName MontagePlayFailed(TEXT("MontagePlayFailed"));
+	static const FName MontagePlayRequested(TEXT("MontagePlayRequested"));
 	static const FName ProjectileImpact(TEXT("ProjectileImpact"));
 	static const FName ProjectileImpactRejected(TEXT("ProjectileImpactRejected"));
 	static const FName ProjectileSpawned(TEXT("ProjectileSpawned"));
 	static const FName ProjectileSpawnFailed(TEXT("ProjectileSpawnFailed"));
+	static const FName RecoveryCompleted(TEXT("RecoveryCompleted"));
+	static const FName RecoveryStarted(TEXT("RecoveryStarted"));
 	static const FName RequestAccepted(TEXT("RequestAccepted"));
 	static const FName RequestRejected(TEXT("RequestRejected"));
 	static const FName RequestSentToServer(TEXT("RequestSentToServer"));
 	static const FName RequestStarted(TEXT("RequestStarted"));
+	static const FName SocketFallbackUsed(TEXT("SocketFallbackUsed"));
+	static const FName SocketResolved(TEXT("SocketResolved"));
+	static const FName StartupStarted(TEXT("StartupStarted"));
 	static const FName TargetTraceHit(TEXT("TargetTraceHit"));
 	static const FName TargetTraceRejected(TEXT("TargetTraceRejected"));
 	static const FName TargetTraceStarted(TEXT("TargetTraceStarted"));
 	static const FName TargetResolved(TEXT("TargetResolved"));
 	static const FName TargetResolutionFailed(TEXT("TargetResolutionFailed"));
+	static const FName DeliveryScheduled(TEXT("DeliveryScheduled"));
+	static const FName DeliveryTriggered(TEXT("DeliveryTriggered"));
 }
 
 namespace
@@ -125,6 +140,30 @@ namespace
 
 		default:
 			return TEXT("Direct");
+		}
+	}
+
+	FString GetRuntimeStateLabel(const EMABSAbilityRuntimeState RuntimeState)
+	{
+		switch (RuntimeState)
+		{
+		case EMABSAbilityRuntimeState::Startup:
+			return TEXT("Startup");
+
+		case EMABSAbilityRuntimeState::Active:
+			return TEXT("Active");
+
+		case EMABSAbilityRuntimeState::Recovery:
+			return TEXT("Recovery");
+
+		case EMABSAbilityRuntimeState::Blocked:
+			return TEXT("Blocked");
+
+		case EMABSAbilityRuntimeState::Idle:
+			return TEXT("Idle");
+
+		default:
+			return TEXT("None");
 		}
 	}
 
@@ -230,6 +269,7 @@ void UMABSAbilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
 	DOREPLIFETIME(UMABSAbilityComponent, GrantedAbilities);
 	DOREPLIFETIME(UMABSAbilityComponent, CooldownGroupStates);
+	DOREPLIFETIME_CONDITION(UMABSAbilityComponent, bReplicateDebugDataToOwningClient, COND_OwnerOnly);
 }
 
 FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* AbilityDefinition)
@@ -291,6 +331,9 @@ FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* A
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 	AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::None;
 	AbilitySpec.CooldownEndTime = 0.0f;
+	AbilitySpec.ActivationStartTime = 0.0f;
+	AbilitySpec.ScheduledDeliveryTime = 0.0f;
+	AbilitySpec.RecoveryEndTime = 0.0f;
 	GrantedAbilities.Add(AbilitySpec);
 
 	EmitDebugEvent(
@@ -344,6 +387,8 @@ bool UMABSAbilityComponent::SetAbilityBlockedByTag(FGameplayTag AbilityTag, cons
 			TEXT("SetAbilityBlockedByTag failed because the ability has not been granted."));
 		return false;
 	}
+
+	ClearAbilityExecutionContext(AbilitySpec->Handle, true);
 
 	AbilitySpec->RuntimeState = bBlocked
 		? EMABSAbilityRuntimeState::Blocked
@@ -456,6 +501,21 @@ FMABSTargetTraceDebugInfo UMABSAbilityComponent::GetLatestTargetTraceDebugInfo()
 	return LatestTargetTraceDebugInfo;
 }
 
+void UMABSAbilityComponent::SetDebugReplicationEnabled(const bool bEnabled)
+{
+	if (!CanMutateAbilityState())
+	{
+		return;
+	}
+
+	bReplicateDebugDataToOwningClient = bEnabled;
+}
+
+bool UMABSAbilityComponent::IsDebugReplicationEnabled() const
+{
+	return bReplicateDebugDataToOwningClient;
+}
+
 void UMABSAbilityComponent::ServerTryActivateAbilityByTag_Implementation(const FGameplayTag AbilityTag)
 {
 	HandleTryActivateAbility(AbilityTag, true);
@@ -469,6 +529,11 @@ void UMABSAbilityComponent::ClientReceiveAbilityDebugEvent_Implementation(const 
 void UMABSAbilityComponent::ClientReceiveTargetTraceDebugInfo_Implementation(const FMABSTargetTraceDebugInfo& DebugInfo)
 {
 	RecordLatestTargetTraceDebugInfo(DebugInfo);
+}
+
+void UMABSAbilityComponent::MulticastPlayActivationMontage_Implementation(UAnimMontage* Montage, const float PlayRate)
+{
+	PlayActivationMontageLocally(Montage, PlayRate);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(const FGameplayTag& AbilityTag, const bool bNotifyOwningClient)
@@ -572,7 +637,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(con
 		EmitDebugEventToOwningClient(AcceptedEvent);
 	}
 
-	return CommitAbility(*AbilitySpec, bNotifyOwningClient);
+	return BeginAbilityStartup(*AbilitySpec, bNotifyOwningClient);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const
@@ -682,14 +747,20 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
-	if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Active)
-	{
-		return EMABSAbilityActivationResult::AlreadyActive;
-	}
-
 	if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Blocked)
 	{
 		return EMABSAbilityActivationResult::Blocked;
+	}
+
+	if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Startup
+		|| AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Active
+		|| AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Recovery)
+	{
+		OutDebugMessage = FString::Printf(
+			TEXT("Activation rejected because ability '%s' is already in runtime state '%s'."),
+			*GetAbilityLabel(AbilityDefinition),
+			*GetRuntimeStateLabel(AbilitySpec.RuntimeState));
+		return EMABSAbilityActivationResult::AlreadyActive;
 	}
 
 	const float AbilityCooldownRemaining = GetCooldownRemainingForAbilitySpec(AbilitySpec);
@@ -746,6 +817,265 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 	return EMABSAbilityActivationResult::Success;
 }
 
+EMABSAbilityActivationResult UMABSAbilityComponent::BeginAbilityStartup(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	UWorld* const World = GetWorld();
+	if (AbilityDefinition == nullptr || World == nullptr)
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::InvalidAbility;
+		ClearAbilityRuntimeTimes(AbilitySpec);
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::RequestRejected,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::InvalidAbility,
+			TEXT("Ability startup could not begin because the world or ability definition was unavailable."));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	ClearAbilityExecutionContext(AbilitySpec.Handle, true);
+
+	FMABSAbilityExecutionContext& ExecutionContext = ActiveAbilityExecutionContexts.FindOrAdd(AbilitySpec.Handle);
+	ExecutionContext.bNotifyOwningClient = bNotifyOwningClient;
+
+	const float CurrentWorldTime = World->GetTimeSeconds();
+	const float DeliveryDelay = GetEffectiveDeliveryDelay(*AbilityDefinition);
+	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Startup;
+	AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::Success;
+	AbilitySpec.ActivationStartTime = CurrentWorldTime;
+	AbilitySpec.ScheduledDeliveryTime = CurrentWorldTime + DeliveryDelay;
+	AbilitySpec.RecoveryEndTime = 0.0f;
+
+	const FMABSAbilityDebugEvent StartupStartedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::StartupStarted,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Ability '%s' entered startup. Authored startup is %.2f seconds and delivery is scheduled %.2f seconds after activation start."),
+			*GetAbilityLabel(AbilityDefinition),
+			FMath::Max(0.0f, AbilityDefinition->StartupDuration),
+			DeliveryDelay));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(StartupStartedEvent);
+	}
+
+	RequestAbilityMontagePlayback(AbilitySpec, bNotifyOwningClient);
+
+	const FMABSAbilityDebugEvent DeliveryScheduledEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::DeliveryScheduled,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Scheduled %s delivery for ability '%s' at world time %.2f."),
+			*GetDeliveryModeLabel(AbilityDefinition->DeliveryMode),
+			*GetAbilityLabel(AbilityDefinition),
+			AbilitySpec.ScheduledDeliveryTime));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(DeliveryScheduledEvent);
+	}
+
+	if (DeliveryDelay <= KINDA_SMALL_NUMBER)
+	{
+		TriggerScheduledAbilityDelivery(AbilitySpec.Handle);
+	}
+	else
+	{
+		FTimerDelegate DeliveryDelegate = FTimerDelegate::CreateUObject(
+			this,
+			&UMABSAbilityComponent::TriggerScheduledAbilityDelivery,
+			AbilitySpec.Handle);
+		World->GetTimerManager().SetTimer(
+			ExecutionContext.DeliveryTimerHandle,
+			DeliveryDelegate,
+			DeliveryDelay,
+			false);
+	}
+
+	return EMABSAbilityActivationResult::Success;
+}
+
+void UMABSAbilityComponent::TriggerScheduledAbilityDelivery(const FMABSAbilityHandle AbilityHandle)
+{
+	FMABSAbilityExecutionContext* const ExecutionContext = ActiveAbilityExecutionContexts.Find(AbilityHandle);
+	FMABSAbilitySpec* const AbilitySpec = FindGrantedAbilitySpecByHandle(AbilityHandle);
+	if (ExecutionContext == nullptr || AbilitySpec == nullptr)
+	{
+		if (ExecutionContext != nullptr)
+		{
+			ActiveAbilityExecutionContexts.Remove(AbilityHandle);
+		}
+		return;
+	}
+
+	if (AbilitySpec->RuntimeState != EMABSAbilityRuntimeState::Startup)
+	{
+		ClearAbilityExecutionContext(AbilityHandle, false);
+		return;
+	}
+
+	AbilitySpec->RuntimeState = EMABSAbilityRuntimeState::Active;
+	AbilitySpec->ScheduledDeliveryTime = 0.0f;
+
+	const FMABSAbilityDebugEvent DeliveryTriggeredEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::DeliveryTriggered,
+		AbilitySpec->AbilityTag,
+		AbilitySpec->Handle,
+		AbilitySpec->RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Triggered %s delivery for ability '%s' at world time %.2f."),
+			AbilitySpec->AbilityDefinition != nullptr
+				? *GetDeliveryModeLabel(AbilitySpec->AbilityDefinition->DeliveryMode)
+				: TEXT("Unknown"),
+			*GetAbilityLabel(AbilitySpec->AbilityDefinition),
+			GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0f));
+	if (ExecutionContext->bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(DeliveryTriggeredEvent);
+	}
+
+	CommitAbility(*AbilitySpec, ExecutionContext->bNotifyOwningClient);
+}
+
+void UMABSAbilityComponent::BeginAbilityRecovery(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	UWorld* const World = GetWorld();
+	if (AbilityDefinition == nullptr || World == nullptr)
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
+		return;
+	}
+
+	const float CurrentWorldTime = World->GetTimeSeconds();
+	const float RecoveryDuration = FMath::Max(0.0f, AbilityDefinition->RecoveryDuration);
+	const float ActivationElapsedTime = AbilitySpec.ActivationStartTime > 0.0f
+		? FMath::Max(0.0f, CurrentWorldTime - AbilitySpec.ActivationStartTime)
+		: 0.0f;
+	const float RemainingRecoveryTime = FMath::Max(0.0f, RecoveryDuration - ActivationElapsedTime);
+	AbilitySpec.ScheduledDeliveryTime = 0.0f;
+	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Recovery;
+	AbilitySpec.RecoveryEndTime = RemainingRecoveryTime > KINDA_SMALL_NUMBER
+		? CurrentWorldTime + RemainingRecoveryTime
+		: CurrentWorldTime;
+
+	const FMABSAbilityDebugEvent RecoveryStartedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::RecoveryStarted,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Ability '%s' entered recovery with %.2f seconds remaining. Authored total ability time is %.2f seconds from activation start."),
+			*GetAbilityLabel(AbilityDefinition),
+			RemainingRecoveryTime,
+			RecoveryDuration));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(RecoveryStartedEvent);
+	}
+
+	if (RemainingRecoveryTime <= KINDA_SMALL_NUMBER)
+	{
+		CompleteAbilityRecovery(AbilitySpec.Handle);
+		return;
+	}
+
+	FMABSAbilityExecutionContext& ExecutionContext = ActiveAbilityExecutionContexts.FindOrAdd(AbilitySpec.Handle);
+	ExecutionContext.bNotifyOwningClient = bNotifyOwningClient;
+
+	FTimerDelegate RecoveryDelegate = FTimerDelegate::CreateUObject(
+		this,
+		&UMABSAbilityComponent::CompleteAbilityRecovery,
+		AbilitySpec.Handle);
+	World->GetTimerManager().SetTimer(
+		ExecutionContext.RecoveryTimerHandle,
+		RecoveryDelegate,
+		RemainingRecoveryTime,
+		false);
+}
+
+void UMABSAbilityComponent::CompleteAbilityRecovery(const FMABSAbilityHandle AbilityHandle)
+{
+	FMABSAbilityExecutionContext* const ExecutionContext = ActiveAbilityExecutionContexts.Find(AbilityHandle);
+	FMABSAbilitySpec* const AbilitySpec = FindGrantedAbilitySpecByHandle(AbilityHandle);
+	if (AbilitySpec == nullptr)
+	{
+		if (ExecutionContext != nullptr)
+		{
+			ActiveAbilityExecutionContexts.Remove(AbilityHandle);
+		}
+		return;
+	}
+
+	const bool bNotifyOwningClient = ExecutionContext != nullptr ? ExecutionContext->bNotifyOwningClient : false;
+	AbilitySpec->RuntimeState = EMABSAbilityRuntimeState::Idle;
+	AbilitySpec->RecoveryEndTime = 0.0f;
+	AbilitySpec->ActivationStartTime = 0.0f;
+	AbilitySpec->ScheduledDeliveryTime = 0.0f;
+
+	const FMABSAbilityDebugEvent RecoveryCompletedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::RecoveryCompleted,
+		AbilitySpec->AbilityTag,
+		AbilitySpec->Handle,
+		AbilitySpec->RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Ability '%s' completed recovery and returned to idle."),
+			*GetAbilityLabel(AbilitySpec->AbilityDefinition)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(RecoveryCompletedEvent);
+	}
+
+	ClearAbilityExecutionContext(AbilityHandle, false);
+}
+
+void UMABSAbilityComponent::ClearAbilityExecutionContext(const FMABSAbilityHandle AbilityHandle, const bool bResetRuntimeTimes)
+{
+	if (FMABSAbilityExecutionContext* const ExecutionContext = ActiveAbilityExecutionContexts.Find(AbilityHandle))
+	{
+		if (UWorld* const World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(ExecutionContext->DeliveryTimerHandle);
+			World->GetTimerManager().ClearTimer(ExecutionContext->RecoveryTimerHandle);
+		}
+
+		ActiveAbilityExecutionContexts.Remove(AbilityHandle);
+	}
+
+	if (bResetRuntimeTimes)
+	{
+		if (FMABSAbilitySpec* const AbilitySpec = FindGrantedAbilitySpecByHandle(AbilityHandle))
+		{
+			ClearAbilityRuntimeTimes(*AbilitySpec);
+		}
+	}
+}
+
+void UMABSAbilityComponent::ClearAbilityRuntimeTimes(FMABSAbilitySpec& AbilitySpec)
+{
+	AbilitySpec.ActivationStartTime = 0.0f;
+	AbilitySpec.ScheduledDeliveryTime = 0.0f;
+	AbilitySpec.RecoveryEndTime = 0.0f;
+}
+
 EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
 {
 	ClearLatestTargetTraceDebugInfo(bNotifyOwningClient);
@@ -755,6 +1085,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::InvalidAbility;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::RequestRejected,
@@ -797,6 +1128,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 			{
 				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::TargetResolutionFailed;
+				ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 					MABSAbilityComponentEventNames::TargetResolutionFailed,
@@ -836,6 +1168,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 			{
 				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+				ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 					MABSAbilityComponentEventNames::DeliveryFailed,
@@ -863,6 +1196,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 			{
 				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+				ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 					MABSAbilityComponentEventNames::DeliveryFailed,
@@ -888,6 +1222,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 	default:
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::InvalidAbility;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::DeliveryFailed,
@@ -919,36 +1254,49 @@ AActor* UMABSAbilityComponent::ExecuteHitTraceDelivery(
 	const bool bNotifyOwningClient)
 {
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
-	AActor* const Owner = GetOwner();
-	if (AbilityDefinition == nullptr || Owner == nullptr)
+	if (AbilityDefinition == nullptr)
 	{
-		OutDebugMessage = TEXT("HitTrace delivery failed because the ability definition or owning actor was invalid.");
+		OutDebugMessage = TEXT("HitTrace delivery failed because the ability definition was invalid.");
 		return nullptr;
 	}
 
-	FVector TraceStart = FVector::ZeroVector;
-	FRotator TraceRotation = FRotator::ZeroRotator;
-	FString ViewPointDescription;
-	if (!GetTargetTraceViewPoint(TraceStart, TraceRotation, ViewPointDescription))
+	FTransform OriginTransform = FTransform::Identity;
+	FString OriginDescription;
+	if (!ResolveDeliveryOriginTransform(
+		*AbilityDefinition,
+		EMABSDeliveryMode::HitTrace,
+		OriginTransform,
+		OriginDescription,
+		bNotifyOwningClient))
 	{
-		OutDebugMessage = TEXT("HitTrace delivery failed because the trace viewpoint was unavailable.");
+		OutDebugMessage = TEXT("HitTrace delivery failed because no valid delivery origin could be resolved.");
 		return nullptr;
 	}
 
-	FVector GameplayTraceStart = TraceStart;
-	FRotator UnusedTraceRotation = TraceRotation;
-	Owner->GetActorEyesViewPoint(GameplayTraceStart, UnusedTraceRotation);
-	const FVector TraceEnd = GameplayTraceStart + (TraceRotation.Vector() * AbilityDefinition->HitTraceDistance);
+	FVector AimTraceStart = FVector::ZeroVector;
+	FRotator TraceRotation = OriginTransform.GetRotation().Rotator();
+	FString ViewPointDescription = OriginDescription;
+	if (GetTargetTraceViewPoint(AimTraceStart, TraceRotation, ViewPointDescription))
+	{
+		ViewPointDescription = FString::Printf(TEXT("%s + %sAim"), *OriginDescription, *ViewPointDescription);
+	}
+	else
+	{
+		ViewPointDescription = FString::Printf(TEXT("%s + OriginRotation"), *OriginDescription);
+	}
+
+	const FVector TraceStart = OriginTransform.GetLocation();
+	const FVector TraceEnd = TraceStart + (TraceRotation.Vector() * AbilityDefinition->HitTraceDistance);
 	return ResolveActorTargetFromTrace(
 		AbilitySpec,
-		GameplayTraceStart,
+		TraceStart,
 		TraceEnd,
 		EMABSDeliveryMode::HitTrace,
 		GetTraceModeForRadius(AbilityDefinition->HitTraceRadius),
 		AbilityDefinition->HitTraceRadius,
 		false,
 		TEXT("HitTrace delivery"),
-		FString::Printf(TEXT("%sAim + OwnerEyesStart"), *ViewPointDescription),
+		ViewPointDescription,
 		NAME_None,
 		MABSAbilityComponentEventNames::HitTraceHit,
 		MABSAbilityComponentEventNames::HitTraceRejected,
@@ -962,15 +1310,27 @@ AActor* UMABSAbilityComponent::ExecuteMeleeDelivery(
 	const bool bNotifyOwningClient)
 {
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
-	AActor* const Owner = GetOwner();
-	if (AbilityDefinition == nullptr || Owner == nullptr)
+	if (AbilityDefinition == nullptr)
 	{
-		OutDebugMessage = TEXT("Melee delivery failed because the ability definition or owning actor was invalid.");
+		OutDebugMessage = TEXT("Melee delivery failed because the ability definition was invalid.");
 		return nullptr;
 	}
 
-	const FVector ForwardVector = Owner->GetActorForwardVector();
-	const FVector TraceStart = Owner->GetActorLocation() + (ForwardVector * AbilityDefinition->MeleeForwardOffset);
+	FTransform OriginTransform = FTransform::Identity;
+	FString OriginDescription;
+	if (!ResolveDeliveryOriginTransform(
+		*AbilityDefinition,
+		EMABSDeliveryMode::Melee,
+		OriginTransform,
+		OriginDescription,
+		bNotifyOwningClient))
+	{
+		OutDebugMessage = TEXT("Melee delivery failed because no valid delivery origin could be resolved.");
+		return nullptr;
+	}
+
+	const FVector ForwardVector = ResolveMeleeTraceDirection();
+	const FVector TraceStart = OriginTransform.GetLocation() + (ForwardVector * AbilityDefinition->MeleeForwardOffset);
 	const FVector TraceEnd = TraceStart + (ForwardVector * AbilityDefinition->MeleeRange);
 	return ResolveActorTargetFromTrace(
 		AbilitySpec,
@@ -981,7 +1341,7 @@ AActor* UMABSAbilityComponent::ExecuteMeleeDelivery(
 		AbilityDefinition->MeleeRadius,
 		false,
 		TEXT("Melee delivery"),
-		TEXT("OwnerForwardFromActorLocation"),
+		FString::Printf(TEXT("%s + OwnerFacing"), *OriginDescription),
 		NAME_None,
 		MABSAbilityComponentEventNames::MeleeHit,
 		MABSAbilityComponentEventNames::MeleeRejected,
@@ -999,6 +1359,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
@@ -1029,10 +1390,11 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 
 	FTransform SpawnTransform = FTransform::Identity;
 	FString SpawnTransformMessage;
-	if (!GetProjectileSpawnTransform(*AbilityDefinition, SpawnTransform, SpawnTransformMessage))
+	if (!GetProjectileSpawnTransform(*AbilityDefinition, SpawnTransform, SpawnTransformMessage, bNotifyOwningClient))
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
@@ -1073,6 +1435,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FString SpawnFailedMessage = FString::Printf(
 			TEXT("Projectile delivery failed because class '%s' could not be spawned. %s"),
@@ -1141,6 +1504,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CompleteResolvedTargetAbilit
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = EffectResult;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::EffectApplicationFailed,
@@ -1183,6 +1547,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::FinalizeAbilityCommit(
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = CostSpendResult;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::CostRejected,
@@ -1231,15 +1596,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::FinalizeAbilityCommit(
 		EmitDebugEventToOwningClient(DebugEvent);
 	}
 
-	if (UWorld* World = GetWorld())
-	{
-		FTimerDelegate ResetDelegate = FTimerDelegate::CreateUObject(this, &UMABSAbilityComponent::ResetAbilityToIdle, AbilitySpec.Handle);
-		World->GetTimerManager().SetTimerForNextTick(ResetDelegate);
-	}
-	else
-	{
-		ResetAbilityToIdle(AbilitySpec.Handle);
-	}
+	BeginAbilityRecovery(AbilitySpec, bNotifyOwningClient);
 
 	return EMABSAbilityActivationResult::Success;
 }
@@ -1880,9 +2237,12 @@ void UMABSAbilityComponent::ResetAbilityToIdle(const FMABSAbilityHandle AbilityH
 		return;
 	}
 
-	if (AbilitySpec->RuntimeState == EMABSAbilityRuntimeState::Active)
+	if (AbilitySpec->RuntimeState == EMABSAbilityRuntimeState::Startup
+		|| AbilitySpec->RuntimeState == EMABSAbilityRuntimeState::Active
+		|| AbilitySpec->RuntimeState == EMABSAbilityRuntimeState::Recovery)
 	{
 		AbilitySpec->RuntimeState = EMABSAbilityRuntimeState::Idle;
+		ClearAbilityExecutionContext(AbilityHandle, true);
 	}
 }
 
@@ -2016,6 +2376,11 @@ FMABSAbilityDebugEvent UMABSAbilityComponent::EmitDebugEvent(
 
 void UMABSAbilityComponent::EmitDebugEventToOwningClient(const FMABSAbilityDebugEvent& DebugEvent)
 {
+	if (!bReplicateDebugDataToOwningClient)
+	{
+		return;
+	}
+
 	AActor* Owner = GetOwner();
 	if (Owner == nullptr || Owner->GetNetOwningPlayer() == nullptr)
 	{
@@ -2032,6 +2397,11 @@ void UMABSAbilityComponent::RecordLatestTargetTraceDebugInfo(const FMABSTargetTr
 
 void UMABSAbilityComponent::EmitLatestTargetTraceDebugInfoToOwningClient(const FMABSTargetTraceDebugInfo& DebugInfo)
 {
+	if (!bReplicateDebugDataToOwningClient)
+	{
+		return;
+	}
+
 	AActor* Owner = GetOwner();
 	if (Owner == nullptr || Owner->GetNetOwningPlayer() == nullptr)
 	{
@@ -2077,36 +2447,399 @@ bool UMABSAbilityComponent::GetTargetTraceViewPoint(
 	return true;
 }
 
-bool UMABSAbilityComponent::GetProjectileSpawnTransform(
-	const UMABSAbilityDefinition& AbilityDefinition,
-	FTransform& OutSpawnTransform,
-	FString& OutDebugMessage) const
+float UMABSAbilityComponent::GetEffectiveDeliveryDelay(const UMABSAbilityDefinition& AbilityDefinition) const
+{
+	const float StartupDuration = FMath::Max(0.0f, AbilityDefinition.StartupDuration);
+	const float DeliveryTime = FMath::Max(0.0f, AbilityDefinition.DeliveryTime);
+	if (DeliveryTime <= KINDA_SMALL_NUMBER)
+	{
+		return StartupDuration;
+	}
+
+	return FMath::Max(StartupDuration, DeliveryTime);
+}
+
+bool UMABSAbilityComponent::RequestAbilityMontagePlayback(
+	const FMABSAbilitySpec& AbilitySpec,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr || AbilityDefinition->ActivationMontage == nullptr)
+	{
+		return false;
+	}
+
+	const float PlayRate = FMath::Max(0.01f, AbilityDefinition->MontagePlayRate);
+	const FMABSAbilityDebugEvent RequestedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::MontagePlayRequested,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Requested activation montage '%s' at play rate %.2f for ability '%s'."),
+			*GetNameSafe(AbilityDefinition->ActivationMontage),
+			PlayRate,
+			*GetAbilityLabel(AbilityDefinition)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(RequestedEvent);
+	}
+
+	const ENetMode NetMode = GetNetMode();
+	if (NetMode == NM_Standalone)
+	{
+		if (!PlayActivationMontageLocally(AbilityDefinition->ActivationMontage, PlayRate))
+		{
+			const FMABSAbilityDebugEvent FailedEvent = EmitDebugEvent(
+				MABSAbilityComponentEventNames::MontagePlayFailed,
+				AbilitySpec.AbilityTag,
+				AbilitySpec.Handle,
+				AbilitySpec.RuntimeState,
+				EMABSAbilityActivationResult::Success,
+				FString::Printf(
+					TEXT("Activation montage '%s' could not play because no valid skeletal mesh anim instance was found."),
+					*GetNameSafe(AbilityDefinition->ActivationMontage)));
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(FailedEvent);
+			}
+
+			return false;
+		}
+
+		return true;
+	}
+
+	if (NetMode == NM_ListenServer)
+	{
+		USkeletalMeshComponent* const SkeletalMeshComponent = ResolveAbilitySkeletalMeshComponent();
+		if (SkeletalMeshComponent != nullptr && SkeletalMeshComponent->GetAnimInstance() != nullptr)
+		{
+			MulticastPlayActivationMontage(AbilityDefinition->ActivationMontage, PlayRate);
+			return true;
+		}
+
+		const FMABSAbilityDebugEvent FailedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::MontagePlayFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			FString::Printf(
+				TEXT("Activation montage '%s' was requested, but no valid skeletal mesh anim instance was found on this listen-server instance."),
+				*GetNameSafe(AbilityDefinition->ActivationMontage)));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(FailedEvent);
+		}
+	}
+
+	MulticastPlayActivationMontage(AbilityDefinition->ActivationMontage, PlayRate);
+	return true;
+}
+
+bool UMABSAbilityComponent::PlayActivationMontageLocally(UAnimMontage* Montage, const float PlayRate) const
+{
+	if (Montage == nullptr)
+	{
+		return false;
+	}
+
+	USkeletalMeshComponent* const SkeletalMeshComponent = ResolveAbilitySkeletalMeshComponent();
+	if (SkeletalMeshComponent == nullptr)
+	{
+		return false;
+	}
+
+	PrepareSkeletalMeshForAbilitySocketQueries(*SkeletalMeshComponent);
+
+	UAnimInstance* const AnimInstance = SkeletalMeshComponent->GetAnimInstance();
+	if (AnimInstance == nullptr)
+	{
+		return false;
+	}
+
+	return AnimInstance->Montage_Play(Montage, PlayRate) > 0.0f;
+}
+
+USkeletalMeshComponent* UMABSAbilityComponent::ResolveAbilitySkeletalMeshComponent() const
 {
 	const AActor* const Owner = GetOwner();
 	if (Owner == nullptr)
 	{
-		OutDebugMessage = TEXT("Projectile delivery failed because the owning actor was invalid.");
-		return false;
+		return nullptr;
 	}
 
-	FVector ViewLocation = FVector::ZeroVector;
-	FRotator ViewRotation = FRotator::ZeroRotator;
-	FString ViewPointDescription;
-	if (!GetTargetTraceViewPoint(ViewLocation, ViewRotation, ViewPointDescription))
+	if (const ACharacter* CharacterOwner = Cast<ACharacter>(Owner))
 	{
-		OutDebugMessage = TEXT("Projectile delivery failed because the projectile spawn viewpoint was unavailable.");
+		if (USkeletalMeshComponent* const CharacterMesh = CharacterOwner->GetMesh())
+		{
+			return CharacterMesh;
+		}
+	}
+
+	return Owner->FindComponentByClass<USkeletalMeshComponent>();
+}
+
+void UMABSAbilityComponent::PrepareSkeletalMeshForAbilitySocketQueries(USkeletalMeshComponent& SkeletalMeshComponent) const
+{
+	// Ability socket origins must stay accurate on authority even when the mesh is not rendered locally.
+	if (CanMutateAbilityState()
+		&& SkeletalMeshComponent.VisibilityBasedAnimTickOption != EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones)
+	{
+		SkeletalMeshComponent.VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	}
+
+	if (SkeletalMeshComponent.IsRunningParallelEvaluation())
+	{
+		SkeletalMeshComponent.CompleteParallelAnimationEvaluation(true);
+	}
+
+	SkeletalMeshComponent.TickAnimation(0.0f, false);
+	SkeletalMeshComponent.RefreshBoneTransforms();
+	SkeletalMeshComponent.UpdateComponentToWorld();
+}
+
+FVector UMABSAbilityComponent::ResolveMeleeTraceDirection() const
+{
+	if (const AActor* const Owner = GetOwner())
+	{
+		FVector OwnerForward = Owner->GetActorForwardVector();
+		OwnerForward.Z = 0.0f;
+		if (OwnerForward.Normalize())
+		{
+			return OwnerForward;
+		}
+	}
+
+	FVector TraceStart = FVector::ZeroVector;
+	FRotator TraceRotation = FRotator::ZeroRotator;
+	FString ViewPointDescription;
+	if (GetTargetTraceViewPoint(TraceStart, TraceRotation, ViewPointDescription))
+	{
+		FVector HorizontalAimDirection = TraceRotation.Vector();
+		HorizontalAimDirection.Z = 0.0f;
+		if (HorizontalAimDirection.Normalize())
+		{
+			return HorizontalAimDirection;
+		}
+	}
+
+	return FVector::ForwardVector;
+}
+
+bool UMABSAbilityComponent::TryResolveSocketTransform(
+	const FName& SocketName,
+	FTransform& OutSocketTransform,
+	FString& OutComponentName) const
+{
+	if (SocketName.IsNone())
+	{
 		return false;
 	}
 
-	FVector SpawnOrigin = ViewLocation;
-	FRotator UnusedSpawnRotation = ViewRotation;
-	Owner->GetActorEyesViewPoint(SpawnOrigin, UnusedSpawnRotation);
-	const FVector SpawnLocation = SpawnOrigin + ViewRotation.RotateVector(AbilityDefinition.ProjectileSpawnOffset);
-	OutSpawnTransform = FTransform(ViewRotation, SpawnLocation);
+	if (USkeletalMeshComponent* const SkeletalMeshComponent = ResolveAbilitySkeletalMeshComponent())
+	{
+		if (SkeletalMeshComponent->DoesSocketExist(SocketName))
+		{
+			PrepareSkeletalMeshForAbilitySocketQueries(*SkeletalMeshComponent);
+			OutSocketTransform = SkeletalMeshComponent->GetSocketTransform(SocketName, RTS_World);
+			OutComponentName = GetNameSafe(SkeletalMeshComponent);
+			return true;
+		}
+	}
+
+	const AActor* const Owner = GetOwner();
+	if (Owner == nullptr)
+	{
+		return false;
+	}
+
+	if (USceneComponent* const RootComponent = Owner->GetRootComponent())
+	{
+		if (RootComponent->DoesSocketExist(SocketName))
+		{
+			OutSocketTransform = RootComponent->GetSocketTransform(SocketName, RTS_World);
+			OutComponentName = GetNameSafe(RootComponent);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool UMABSAbilityComponent::ResolveDeliveryOriginTransform(
+	const UMABSAbilityDefinition& AbilityDefinition,
+	const EMABSDeliveryMode DeliveryMode,
+	FTransform& OutOriginTransform,
+	FString& OutOriginDescription,
+	const bool bNotifyOwningClient)
+{
+	AActor* const Owner = GetOwner();
+	if (Owner == nullptr)
+	{
+		OutOriginDescription = TEXT("No owning actor was available.");
+		return false;
+	}
+
+	FName SpecificSocketName = NAME_None;
+	FVector LocalOffset = FVector::ZeroVector;
+	switch (DeliveryMode)
+	{
+	case EMABSDeliveryMode::HitTrace:
+		SpecificSocketName = AbilityDefinition.HitTraceOriginSocketName;
+		LocalOffset = AbilityDefinition.HitTraceOriginOffset;
+		break;
+
+	case EMABSDeliveryMode::Melee:
+		SpecificSocketName = AbilityDefinition.MeleeOriginSocketName;
+		LocalOffset = AbilityDefinition.MeleeOriginOffset;
+		break;
+
+	case EMABSDeliveryMode::Projectile:
+		SpecificSocketName = AbilityDefinition.ProjectileSpawnSocketName;
+		LocalOffset = AbilityDefinition.ProjectileSpawnOffset;
+		break;
+
+	default:
+		break;
+	}
+
+	const FName ResolvedSocketName = !SpecificSocketName.IsNone()
+		? SpecificSocketName
+		: AbilityDefinition.DeliveryOriginSocketName;
+	const FMABSAbilitySpec* const AbilitySpec = FindGrantedAbilitySpecByTagInternal(AbilityDefinition.AbilityTag);
+	const FMABSAbilityHandle AbilityHandle = AbilitySpec != nullptr ? AbilitySpec->Handle : FMABSAbilityHandle();
+	const EMABSAbilityRuntimeState RuntimeState = AbilitySpec != nullptr
+		? AbilitySpec->RuntimeState
+		: EMABSAbilityRuntimeState::None;
+
+	FTransform ResolvedTransform = FTransform::Identity;
+	FString ComponentName;
+	if (!ResolvedSocketName.IsNone() && TryResolveSocketTransform(ResolvedSocketName, ResolvedTransform, ComponentName))
+	{
+		ResolvedTransform.AddToTranslation(ResolvedTransform.GetRotation().RotateVector(LocalOffset));
+		OutOriginTransform = ResolvedTransform;
+		OutOriginDescription = FString::Printf(
+			TEXT("Socket '%s' on '%s'"),
+			*ResolvedSocketName.ToString(),
+			*ComponentName);
+
+		const FMABSAbilityDebugEvent SocketResolvedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::SocketResolved,
+			AbilityDefinition.AbilityTag,
+			AbilityHandle,
+			RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			FString::Printf(
+				TEXT("Resolved %s origin from socket '%s' on component '%s'."),
+				*GetDeliveryModeLabel(DeliveryMode),
+				*ResolvedSocketName.ToString(),
+				*ComponentName));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(SocketResolvedEvent);
+		}
+
+		return true;
+	}
+
+	FString FallbackDescription;
+	bool bResolvedFallback = false;
+	switch (DeliveryMode)
+	{
+	case EMABSDeliveryMode::HitTrace:
+	case EMABSDeliveryMode::Projectile:
+		{
+			FVector ViewLocation = FVector::ZeroVector;
+			FRotator ViewRotation = FRotator::ZeroRotator;
+			if (GetTargetTraceViewPoint(ViewLocation, ViewRotation, FallbackDescription))
+			{
+				ResolvedTransform = FTransform(ViewRotation, ViewLocation);
+				bResolvedFallback = true;
+				break;
+			}
+		}
+		break;
+
+	case EMABSDeliveryMode::Melee:
+	default:
+		break;
+	}
+
+	if (!bResolvedFallback)
+	{
+		ResolvedTransform = Owner->GetActorTransform();
+		FallbackDescription = TEXT("OwnerActorTransform");
+	}
+
+	ResolvedTransform.AddToTranslation(ResolvedTransform.GetRotation().RotateVector(LocalOffset));
+	OutOriginTransform = ResolvedTransform;
+	OutOriginDescription = FallbackDescription;
+
+	const FMABSAbilityDebugEvent SocketFallbackEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::SocketFallbackUsed,
+		AbilityDefinition.AbilityTag,
+		AbilityHandle,
+		RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		ResolvedSocketName.IsNone()
+			? FString::Printf(
+				TEXT("Using fallback origin '%s' for %s delivery because no socket was authored."),
+				*FallbackDescription,
+				*GetDeliveryModeLabel(DeliveryMode))
+			: FString::Printf(
+				TEXT("Using fallback origin '%s' for %s delivery because socket '%s' was unavailable."),
+				*FallbackDescription,
+				*GetDeliveryModeLabel(DeliveryMode),
+				*ResolvedSocketName.ToString()));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(SocketFallbackEvent);
+	}
+
+	return true;
+}
+
+bool UMABSAbilityComponent::GetProjectileSpawnTransform(
+	const UMABSAbilityDefinition& AbilityDefinition,
+	FTransform& OutSpawnTransform,
+	FString& OutDebugMessage,
+	const bool bNotifyOwningClient)
+{
+	FTransform OriginTransform = FTransform::Identity;
+	FString OriginDescription;
+	if (!ResolveDeliveryOriginTransform(
+		AbilityDefinition,
+		EMABSDeliveryMode::Projectile,
+		OriginTransform,
+		OriginDescription,
+		bNotifyOwningClient))
+	{
+		OutDebugMessage = TEXT("Projectile delivery failed because no valid projectile origin could be resolved.");
+		return false;
+	}
+
+	FVector AimLocation = FVector::ZeroVector;
+	FRotator SpawnRotation = OriginTransform.GetRotation().Rotator();
+	FString AimDescription = OriginDescription;
+	if (GetTargetTraceViewPoint(AimLocation, SpawnRotation, AimDescription))
+	{
+		AimDescription = FString::Printf(TEXT("%s + %sAim"), *OriginDescription, *AimDescription);
+	}
+	else
+	{
+		AimDescription = FString::Printf(TEXT("%s + OriginRotation"), *OriginDescription);
+	}
+
+	const FVector SpawnLocation = OriginTransform.GetLocation();
+	OutSpawnTransform = FTransform(SpawnRotation, SpawnLocation);
 	OutDebugMessage = FString::Printf(
-		TEXT("Prepared projectile spawn at %s using viewpoint '%s'."),
+		TEXT("Prepared projectile spawn at %s using origin '%s' and aim '%s'."),
 		*FormatVectorForDebug(SpawnLocation),
-		*ViewPointDescription);
+		*OriginDescription,
+		*AimDescription);
 	return true;
 }
 

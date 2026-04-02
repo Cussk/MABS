@@ -43,7 +43,7 @@ FString UMABSDebugBlueprintLibrary::FormatTargetTraceDebugInfo(const FMABSTarget
 	const FString TraceLabel = DebugInfo.TraceLabel.IsEmpty() ? TEXT("Trace") : DebugInfo.TraceLabel;
 
 	return FString::Printf(
-		TEXT("[%s %s] AbilityTag=%s Hit=%s Accepted=%s Actor=%s Component=%s Distance=%.0f Label=%s Message=%s"),
+		TEXT("[%s %s] AbilityTag=%s Hit=%s Accepted=%s Actor=%s Component=%s Distance=%.0f Label=%s View=%s Message=%s"),
 		*DeliveryModeName,
 		*TraceModeName,
 		*DebugInfo.AbilityTag.ToString(),
@@ -53,6 +53,7 @@ FString UMABSDebugBlueprintLibrary::FormatTargetTraceDebugInfo(const FMABSTarget
 		*DebugInfo.HitComponentName,
 		DebugInfo.HitDistance,
 		*TraceLabel,
+		*DebugInfo.ViewPointDescription,
 		*DebugInfo.ResultMessage);
 }
 
@@ -70,6 +71,25 @@ FString UMABSDebugBlueprintLibrary::FormatAbilitySpecRuntimeSummary(const FMABSA
 	const FString CooldownText = CooldownRemaining > 0.0f
 		? FString::Printf(TEXT("%.2fs"), CooldownRemaining)
 		: TEXT("Ready");
+	const float DeliveryRemaining = AbilitySpec.ScheduledDeliveryTime > 0.0f
+		? FMath::Max(0.0f, AbilitySpec.ScheduledDeliveryTime - CurrentWorldTimeSeconds)
+		: 0.0f;
+	const float RecoveryRemaining = AbilitySpec.RecoveryEndTime > 0.0f
+		? FMath::Max(0.0f, AbilitySpec.RecoveryEndTime - CurrentWorldTimeSeconds)
+		: 0.0f;
+	FString TimingText;
+	if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Startup)
+	{
+		TimingText = FString::Printf(TEXT(" Startup=%.2fs DeliveryIn=%.2fs"), CurrentWorldTimeSeconds - AbilitySpec.ActivationStartTime, DeliveryRemaining);
+	}
+	else if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Recovery)
+	{
+		TimingText = FString::Printf(TEXT(" Recovery=%.2fs"), RecoveryRemaining);
+	}
+	else if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Active && AbilitySpec.ActivationStartTime > 0.0f)
+	{
+		TimingText = FString::Printf(TEXT(" ActiveFor=%.2fs"), CurrentWorldTimeSeconds - AbilitySpec.ActivationStartTime);
+	}
 
 	FString CooldownGroupText;
 	if (AbilitySpec.AbilityDefinition != nullptr && AbilitySpec.AbilityDefinition->CooldownGroupTag.IsValid())
@@ -88,11 +108,12 @@ FString UMABSDebugBlueprintLibrary::FormatAbilitySpecRuntimeSummary(const FMABSA
 	}
 
 	return FString::Printf(
-		TEXT("[Ability] Tag=%s State=%s Result=%s Cooldown=%s%s%s"),
+		TEXT("[Ability] Tag=%s State=%s Result=%s Cooldown=%s%s%s%s"),
 		*AbilitySpec.AbilityTag.ToString(),
 		*RuntimeStateName,
 		*ResultName,
 		*CooldownText,
+		*TimingText,
 		*DeliveryModeText,
 		*CooldownGroupText);
 }
@@ -135,6 +156,24 @@ FLinearColor UMABSDebugBlueprintLibrary::GetTargetTraceDebugColor(const FMABSTar
 
 FLinearColor UMABSDebugBlueprintLibrary::GetAbilitySpecRuntimeColor(const FMABSAbilitySpec& AbilitySpec, const float CurrentWorldTimeSeconds)
 {
+	switch (AbilitySpec.RuntimeState)
+	{
+	case EMABSAbilityRuntimeState::Startup:
+		return FLinearColor(0.25f, 0.65f, 0.95f, 1.0f);
+
+	case EMABSAbilityRuntimeState::Active:
+		return FLinearColor(0.2f, 0.85f, 0.35f, 1.0f);
+
+	case EMABSAbilityRuntimeState::Recovery:
+		return FLinearColor(0.95f, 0.6f, 0.2f, 1.0f);
+
+	case EMABSAbilityRuntimeState::Blocked:
+		return FLinearColor(0.95f, 0.3f, 0.25f, 1.0f);
+
+	default:
+		break;
+	}
+
 	const float CooldownRemaining = FMath::Max(0.0f, AbilitySpec.CooldownEndTime - CurrentWorldTimeSeconds);
 	if (CooldownRemaining > 0.0f)
 	{

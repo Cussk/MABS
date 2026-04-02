@@ -2,32 +2,41 @@
 
 ## What it is
 
-This document explains the Phase 4 delivery layer in MABS.
+This document explains the Phase 5 delivery layer in MABS.
 
 ## Why it exists
 
-Earlier phases only supported direct target resolution and instant effect application. Phase 4 adds the common delivery patterns users expect from a practical ability system.
+Earlier phases established delivery modes. Phase 5 makes them usable for authored combat timing by adding startup, scheduled delivery, recovery, and socket-first origins.
 
 ## Current delivery modes
 
 ### `Direct`
 
-Keeps the older behavior:
-
-* resolve the target immediately
-* apply the instant effect immediately
+Still uses the direct target path, but now respects authored startup and recovery timing.
 
 ### `HitTrace`
 
-Uses an authority-side line trace or sphere trace to resolve one valid target.
+Uses an authority-side line trace or sphere trace at the authored delivery time. The trace now starts from:
+
+1. `HitTraceOriginSocketName`
+2. `DeliveryOriginSocketName`
+3. a safe fallback origin
 
 ### `Melee`
 
-Uses an authority-side short-range sweep to resolve one valid nearby target.
+Uses an authority-side sweep at the authored delivery time. The sweep now starts from:
+
+1. `MeleeOriginSocketName`
+2. `DeliveryOriginSocketName`
+3. actor transform fallback
 
 ### `Projectile`
 
-Spawns an authority-side projectile actor. The projectile later applies the authored effect on authoritative impact.
+Spawns an authority-side projectile actor at the authored delivery time. Spawn origin now prefers:
+
+1. `ProjectileSpawnSocketName`
+2. `DeliveryOriginSocketName`
+3. viewpoint or actor fallback
 
 ## Commit rules
 
@@ -40,24 +49,32 @@ Spawns an authority-side projectile actor. The projectile later applies the auth
 * commit after authoritative projectile spawn succeeds
 * apply the effect later on impact
 
+For all modes:
+
+* cost affordability is still validated before startup
+* cost spending and cooldown start only after successful delivery
+* failed delivery returns the granted spec to `Idle`
+
 ## How to use it
 
 1. Set `DeliveryMode` on `UMABSAbilityDefinition`.
-2. Fill in the delivery-specific fields for that mode.
-3. Grant the ability on authority.
-4. Activate it by tag.
-5. Inspect delivery-specific debug events.
+2. Set `StartupDuration`, `DeliveryTime`, and `RecoveryDuration`.
+3. Author `RecoveryDuration` as the total desired skill time from activation start.
+4. Fill in the delivery-specific fields and optional socket fields.
+5. Grant the ability on authority.
+6. Activate it by tag.
+7. Inspect timing, socket, and delivery debug events.
 
 ## Example
 
-* self-heal uses `Direct`
-* rifle shot uses `HitTrace`
-* sword slash uses `Melee`
-* fireball uses `Projectile`
+* self-heal uses `Direct` with short startup and recovery
+* rifle shot uses `HitTrace` from a muzzle socket
+* sword slash uses `Melee` from a weapon or hand socket
+* fireball uses `Projectile` from a hand socket
 
 ## Not included
 
-Phase 4 delivery does not include:
+Phase 5 delivery does not include:
 
 * AoE zones
 * location placement

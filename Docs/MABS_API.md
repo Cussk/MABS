@@ -2,7 +2,7 @@
 
 ## What it is
 
-This document lists the current Phase 4 public surface for MABS and shows which module owns authored delivery data, runtime state, projectile runtime, and debug helpers.
+This document lists the current Phase 5 public surface for MABS and shows which module owns authored timing, socket data, runtime scheduling state, projectile runtime, and debug helpers.
 
 ## Module ownership
 
@@ -75,6 +75,9 @@ Current fields:
 * `RuntimeState`
 * `LastActivationResult`
 * `CooldownEndTime`
+* `ActivationStartTime`
+* `ScheduledDeliveryTime`
+* `RecoveryEndTime`
 
 ### `FMABSTargetTraceDebugInfo`
 
@@ -91,6 +94,7 @@ Current notable fields:
 * `TraceRadius`
 * `HitActorName`
 * `TraceLabel`
+* `ViewPointDescription`
 * `ResultMessage`
 
 ## Important classes
@@ -106,14 +110,25 @@ Current authored fields include:
 * `DeliveryMode`
 * `InstantEffectType`
 * `EffectMagnitude`
+* `StartupDuration`
+* `DeliveryTime`
+* `RecoveryDuration` as total ability duration from activation start
 * direct targeting fields
+* `DeliveryOriginSocketName`
 * `HitTraceDistance`
 * `HitTraceRadius`
+* `HitTraceOriginSocketName`
+* `HitTraceOriginOffset`
 * `MeleeRange`
 * `MeleeRadius`
+* `MeleeOriginSocketName`
+* `MeleeOriginOffset`
 * `MeleeForwardOffset`
 * `ProjectileActorClass`
+* `ProjectileSpawnSocketName`
 * `ProjectileSpawnOffset`
+* `ActivationMontage`
+* `MontagePlayRate`
 * `CooldownSeconds`
 * `CooldownGroupTag`
 * `ResourceCost`
@@ -125,6 +140,8 @@ Still exposes:
 * `GrantAbility(...)`
 * `SetAbilityBlockedByTag(...)`
 * `TryActivateAbilityByTag(...)`
+* `SetDebugReplicationEnabled(...)`
+* `IsDebugReplicationEnabled()`
 * `GetGrantedAbilities()`
 * `FindGrantedAbilitySpecByTag(...)`
 * cooldown query helpers
@@ -135,6 +152,9 @@ Runtime ownership now includes:
 
 * granted ability specs
 * cooldown-group state
+* startup, delivery, and recovery scheduling
+* socket-based origin resolution
+* optional montage request hooks
 * delivery execution
 * projectile spawn and impact integration
 * recent debug events
@@ -153,8 +173,17 @@ It:
 
 ## Important debug events
 
-Phase 4 adds or highlights:
+Phase 5 adds or highlights:
 
+* `StartupStarted`
+* `DeliveryScheduled`
+* `DeliveryTriggered`
+* `SocketResolved`
+* `SocketFallbackUsed`
+* `MontagePlayRequested`
+* `MontagePlayFailed`
+* `RecoveryStarted`
+* `RecoveryCompleted`
 * `DeliveryStarted`
 * `DeliveryFailed`
 * `HitTraceHit`
@@ -181,4 +210,4 @@ const EMABSAbilityActivationResult Result =
 	AbilityComponent->TryActivateAbilityByTag(FireballTag);
 ```
 
-For `Projectile`, a `Success` result means the projectile was spawned authoritatively and the ability committed successfully. The later impact result is reported through debug events.
+For `Projectile`, a `Success` result still means the projectile was spawned authoritatively and the ability committed successfully. The later impact result is reported through debug events, while the granted spec already moves through `Startup`, `Active`, and `Recovery`.

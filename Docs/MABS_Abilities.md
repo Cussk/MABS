@@ -2,22 +2,23 @@
 
 ## What it is
 
-This document explains the current Phase 4 ability model: authored definitions, granted runtime specs, activation flow, and how delivery now fits between validation and effect application.
+This document explains the current Phase 5 ability model: authored definitions, granted runtime specs, activation timing, socket-aware delivery, and optional montage requests.
 
 ## Why it exists
 
-MABS stays readable by keeping authored data separate from live runtime state. Phase 4 keeps that split intact while adding the first real delivery layer.
+MABS stays readable by keeping authored data separate from live runtime state. Phase 5 keeps that split intact while making runtime timing explicit and inspectable.
 
 ## Ability definitions
 
 `UMABSAbilityDefinition` is the authored asset in `MABSCore`.
 
-Phase 4 authored fields now cover four areas:
+Phase 5 authored fields cover five areas:
 
 * identity and activation: `AbilityTag`, `DisplayName`, `ActivationPolicy`
 * target intent and effect: `TargetType`, `InstantEffectType`, `EffectMagnitude`
 * usage rules: `CooldownSeconds`, `CooldownGroupTag`, `ResourceCost`
-* delivery: `DeliveryMode` plus delivery-specific fields
+* timing: `StartupDuration`, `DeliveryTime`, `RecoveryDuration`
+* delivery and presentation: `DeliveryMode`, socket fields, and optional montage fields
 
 Current delivery modes are:
 
@@ -28,7 +29,7 @@ Current delivery modes are:
 
 ## Granted abilities
 
-Granting still creates a `FMABSAbilitySpec` on `UMABSAbilityComponent`.
+Granting creates a `FMABSAbilitySpec` on `UMABSAbilityComponent`.
 
 Each spec stores:
 
@@ -38,25 +39,29 @@ Each spec stores:
 * the current runtime state
 * the last activation result
 * the personal cooldown end time
+* the activation start timestamp
+* the scheduled delivery timestamp
+* the recovery end timestamp
 
 ## Activation flow
 
-Activation in Phase 4 means:
+Activation in Phase 5 means:
 
 1. code or input calls `TryActivateAbilityByTag`
 2. the request reaches authority
 3. the component validates grant, cooldown, and cost rules
-4. the component emits `DeliveryStarted`
-5. the component executes the authored delivery mode
-6. `Direct`, `HitTrace`, and `Melee` apply the instant effect immediately on success
-7. `Projectile` commits on successful spawn
-8. authority spends cost and starts cooldown on successful commit
-9. projectile impact later applies the authored instant effect on authority
-10. the component emits readable debug events for the full path
+4. the granted spec enters `Startup`
+5. the component optionally requests montage playback
+6. delivery executes at the authored delivery time
+7. `Direct`, `HitTrace`, and `Melee` apply the instant effect on successful delivery
+8. `Projectile` commits on successful spawn
+9. authority spends cost and starts cooldown on successful commit
+10. the granted spec enters `Recovery` and later returns to `Idle`
+11. projectile impact later applies the authored instant effect on authority
 
 ## Direct versus delivery
 
-Target intent and delivery are now separate concepts.
+Target intent and delivery are separate concepts.
 
 Examples:
 
@@ -73,14 +78,25 @@ Authored data answers:
 
 * what the ability should do
 * which delivery mode it uses
-* how its effect, cost, and cooldown are configured
+* how timing is configured
+* which sockets or offsets delivery should use
+* whether an activation montage should be requested
+
+Timing authoring uses:
+
+* `StartupDuration` as startup length from activation start
+* `DeliveryTime` as the intended delivery moment from activation start
+* `RecoveryDuration` as the total intended ability length from activation start
 
 Runtime state answers:
 
 * whether the ability is granted
-* whether it is idle, active, or blocked
+* whether it is idle, in startup, active, in recovery, or blocked
 * what happened on the last activation request
 * when its personal cooldown ends
+* when startup began
+* when delivery is scheduled
+* when recovery ends
 * which cooldown groups are active on the owner
 
 Projectile flight itself is transient runtime state on the spawned projectile actor, not on the data asset.
@@ -91,14 +107,15 @@ Projectile flight itself is transient runtime state on the spawned projectile ac
 2. Set `TargetType` and `DeliveryMode`.
 3. Set `InstantEffectType` and `EffectMagnitude`.
 4. Configure cooldown and cost if needed.
-5. Fill in the delivery-specific fields for hit trace, melee, or projectile.
-6. Grant the ability on authority.
-7. Activate it with `TryActivateAbilityByTag`.
-8. Inspect `FMABSAbilitySpec`, recent debug events, and the overlay.
+5. Fill in the delivery-specific fields.
+6. Fill in timing, socket, and optional montage fields.
+7. Grant the ability on authority.
+8. Activate it with `TryActivateAbilityByTag`.
+9. Inspect `FMABSAbilitySpec`, recent debug events, and the overlay.
 
 ## Not included in this phase
 
-Phase 4 still does not include:
+Phase 5 still does not include:
 
 * AoE zones
 * location abilities
@@ -108,4 +125,4 @@ Phase 4 still does not include:
 * multi-hit melee systems
 * duration-based effects
 * status effects
-* animation systems
+* notify-driven execution as the primary path

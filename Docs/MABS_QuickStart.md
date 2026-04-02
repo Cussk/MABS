@@ -2,49 +2,38 @@
 
 ## What it is
 
-This guide covers the current Phase 4 setup. MABS now supports the Phase 3 cooldown and cost path plus the first real delivery layer:
+This guide covers the current Phase 5 setup. MABS now supports:
 
-* `Direct`
-* `HitTrace`
-* `Melee`
-* `Projectile`
+* `Direct`, `HitTrace`, `Melee`, and `Projectile` delivery
+* authored `StartupDuration`, `DeliveryTime`, and `RecoveryDuration`
+* socket-first delivery origins
+* optional activation montage requests
 
 ## Why it exists
 
-The goal is to get from a blank actor or character to a verified multiplayer-safe ability that:
+The goal is to get from a blank actor or character to a multiplayer-safe ability that:
 
 * validates on authority
-* delivers through the authored mode
-* applies an instant effect
-* spends cost and starts cooldown only on authority
-* explains success or failure through logs, debug events, and the overlay
+* enters `Startup`
+* delivers at an authored time
+* enters `Recovery`
+* spends cost and starts cooldown only after successful delivery
+* explains timing, socket, and delivery behavior through debug events
 
 ## How to use it
 
-### Step 1: Build the project with the plugin enabled
+### Step 1: Add `UMABSAbilityComponent`
 
-Compile the project with the local `MABS` plugin enabled and verify that:
+Add the component to the actor or character that owns abilities.
 
-* `MABSCore`
-* `MABSGameplay`
-* `MABSDebug`
-* `MABSEditor`
+The component owns granted specs, authoritative execution, timing state, cooldowns, costs, and debug data.
 
-load without startup errors.
+### Step 2: Create a `UMABSAbilityDefinition`
 
-### Step 2: Add the ability component
-
-Add `UMABSAbilityComponent` to the actor or character that should own abilities.
-
-The component owns granted specs, authoritative activation, delivery execution, cooldowns, costs, and debug state.
-
-### Step 3: Create an ability definition asset
-
-Create a `MABSAbilityDefinition` and set the core fields:
+Set the core fields:
 
 * `AbilityTag`
 * `DisplayName`
-* `ActivationPolicy`
 * `TargetType`
 * `DeliveryMode`
 * `InstantEffectType`
@@ -53,136 +42,136 @@ Create a `MABSAbilityDefinition` and set the core fields:
 * `CooldownGroupTag`
 * `ResourceCost`
 
-Direct abilities still use the older target authoring:
+Set the Phase 5 timing fields:
 
-* `TargetTraceDistance`
-* `ActorTargetTraceMode`
-* `TargetTraceRadius`
-* `bRequireValidActorTarget`
-* `bIgnoreNonTargetWorldHits`
+* `StartupDuration`
+* `DeliveryTime`
+* `RecoveryDuration`
 
-Phase 4 delivery fields are:
+`RecoveryDuration` should be authored as the total skill time from activation start, not just the tail after delivery.
 
-* `HitTraceDistance`
-* `HitTraceRadius`
-* `MeleeRange`
-* `MeleeRadius`
-* `MeleeForwardOffset`
+Set delivery fields for the chosen mode:
+
+* `HitTraceDistance`, `HitTraceRadius`
+* `MeleeRange`, `MeleeRadius`, `MeleeForwardOffset`
 * `ProjectileActorClass`
-* `ProjectileSpawnOffset`
 
-### Step 4: Implement optional interfaces
+Optional socket-first fields:
+
+* `DeliveryOriginSocketName`
+* `HitTraceOriginSocketName`, `HitTraceOriginOffset`
+* `MeleeOriginSocketName`, `MeleeOriginOffset`
+* `ProjectileSpawnSocketName`, `ProjectileSpawnOffset`
+
+Optional montage fields:
+
+* `ActivationMontage`
+* `MontagePlayRate`
+
+### Step 3: Implement optional interfaces
 
 Implement:
 
 * `IMABSCostReceiver` if `ResourceCost > 0`
 * `IMABSInstantEffectReceiver` on actors that should accept `Heal`
 
-The host-project `AMABSCharacter` still provides a minimal example of both.
-
-### Step 5: Grant an ability on the server
+### Step 4: Grant the ability on authority
 
 Call `GrantAbility` on the authoritative `UMABSAbilityComponent`.
 
-Each grant creates a `FMABSAbilitySpec` that stores:
+Each `FMABSAbilitySpec` stores:
 
 * a stable `FMABSAbilityHandle`
-* the definition reference
-* the copied ability tag
-* runtime state
-* the last activation result
-* the personal cooldown end time
+* the definition reference and copied tag
+* `RuntimeState`
+* `LastActivationResult`
+* `CooldownEndTime`
+* `ActivationStartTime`
+* `ScheduledDeliveryTime`
+* `RecoveryEndTime`
 
-### Step 6: Request activation by tag
+### Step 5: Activate by tag
 
 Call `TryActivateAbilityByTag`.
 
-Behavior now depends on delivery mode:
+Phase 5 flow is:
 
-* `Direct`: resolves the target immediately and applies the effect immediately
-* `HitTrace`: performs an authority-side trace and applies the effect on the first valid hit
-* `Melee`: performs an authority-side short-range sweep and applies the effect on the first valid hit
-* `Projectile`: spawns an authority-side projectile, then applies the effect later on authoritative impact
+1. authority validates the request
+2. the ability enters `Startup`
+3. the component optionally requests montage playback
+4. delivery executes at the authored delivery time
+5. cost and cooldown finalize only after successful delivery
+6. the ability enters `Recovery`
+7. the ability returns to `Idle`
 
-### Step 7: Inspect debug output
+### Step 6: Inspect the runtime overlay and logs
 
-Useful Phase 4 event names include:
+Useful Phase 5 events include:
 
-* `DeliveryStarted`
-* `DeliveryFailed`
-* `HitTraceHit`
-* `HitTraceRejected`
-* `MeleeHit`
-* `MeleeRejected`
-* `ProjectileSpawned`
-* `ProjectileSpawnFailed`
-* `ProjectileImpact`
-* `ProjectileImpactRejected`
-* `EffectApplied`
-* `CostSpent`
-* `CooldownStarted`
-* `CommitSucceeded`
-
-### Step 8: Use the runtime overlay
-
-`AMABSDebugHUD` still provides the current runtime overlay. It now shows:
-
-* the latest target or delivery trace snapshot
-* granted ability summaries, including delivery mode and cooldown remaining
-* the recent event list
+* `StartupStarted`
+* `DeliveryScheduled`
+* `DeliveryTriggered`
+* `SocketResolved`
+* `SocketFallbackUsed`
+* `MontagePlayRequested`
+* `MontagePlayFailed`
+* `RecoveryStarted`
+* `RecoveryCompleted`
 
 ## Example setups
 
-Example direct self-heal:
+Example self-heal:
 
 1. Set `TargetType = Self`.
 2. Set `DeliveryMode = Direct`.
-3. Set `InstantEffectType = Heal`.
-4. Set `EffectMagnitude = 25`.
+3. Set `StartupDuration = 0.15`.
+4. Set `DeliveryTime = 0.15`.
+5. Set `RecoveryDuration = 0.35`.
+6. Set `InstantEffectType = Heal`.
 
 Example rifle shot:
 
 1. Set `TargetType = Actor`.
 2. Set `DeliveryMode = HitTrace`.
 3. Set `HitTraceDistance = 2000`.
-4. Set `HitTraceRadius = 0`.
-5. Set `InstantEffectType = Damage`.
+4. Set `HitTraceOriginSocketName = Muzzle`.
+5. Set `DeliveryTime = 0.08`.
 
 Example sword slash:
 
 1. Set `TargetType = Actor`.
 2. Set `DeliveryMode = Melee`.
-3. Set `MeleeRange = 200`.
-4. Set `MeleeRadius = 75`.
-5. Set `InstantEffectType = Damage`.
+3. Set `MeleeOriginSocketName = weapon_tip`.
+4. Set `DeliveryTime = 0.2`.
+5. Set `MeleeRange = 200`.
+6. Set `RecoveryDuration = 0.45`.
 
 Example fireball:
 
 1. Set `TargetType = Actor`.
 2. Set `DeliveryMode = Projectile`.
 3. Set `ProjectileActorClass` to a class derived from `AMABSProjectileBase`.
-4. Set `ProjectileSpawnOffset`.
-5. Set `InstantEffectType = Damage`.
+4. Set `ProjectileSpawnSocketName = hand_r`.
+5. Optionally set `ActivationMontage`.
 
 ## Validation checklist
 
 Singleplayer:
 
-* direct self-heal still works
-* hit-trace abilities resolve a valid target
-* melee abilities resolve a valid nearby target
-* projectile abilities spawn and impact correctly
-* cooldown and cost still work with each delivery mode
+* direct self-heal respects startup and recovery
+* hit trace, melee, and projectile delivery fire at the expected delivery time
+* valid sockets are used
+* fallback origins work when a socket is missing
+* cooldown and cost do not finalize before successful delivery
 
 Listen server:
 
-* host can use every delivery mode
 * remote clients still route activation through authority
-* projectile spawn and impact stay authoritative
-* the owning client receives authoritative delivery events
+* timing remains authoritative
+* the owning client receives timing and socket debug events
 
 Dedicated server:
 
-* delivery logic remains server-authoritative
-* projectile spawn and impact remain server-authoritative
-* remote clients cannot fake delivery results
+* timed delivery remains authoritative
+* projectile spawn timing remains authoritative
+* no editor-only dependency leaks into runtime code

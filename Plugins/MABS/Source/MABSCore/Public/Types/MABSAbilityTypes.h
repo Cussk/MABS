@@ -31,7 +31,9 @@ enum class EMABSAbilityRuntimeState : uint8
 {
 	None UMETA(DisplayName="None"),
 	Idle UMETA(DisplayName="Idle"),
+	Startup UMETA(DisplayName="Startup"),
 	Active UMETA(DisplayName="Active"),
+	Recovery UMETA(DisplayName="Recovery"),
 	Blocked UMETA(DisplayName="Blocked")
 };
 
@@ -133,6 +135,15 @@ struct MABSCORE_API FMABSAbilitySpec
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
 	float CooldownEndTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	float ActivationStartTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	float ScheduledDeliveryTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	float RecoveryEndTime = 0.0f;
 };
 
 USTRUCT(BlueprintType)

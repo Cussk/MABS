@@ -23,10 +23,12 @@ Use:
 On authority, MABS:
 
 1. starts delivery
-2. performs a short forward sphere sweep
-3. validates the first resolved actor
-4. applies the authored instant effect
-5. spends cost and starts cooldown on successful commit
+2. uses the authored melee socket or fallback origin as the sweep start location
+3. uses the owning actor's current facing as the sweep direction
+4. falls back to controller or eye-view yaw only if actor forward is unavailable
+5. validates the first resolved actor
+6. applies the authored instant effect
+7. spends cost and starts cooldown on successful commit
 
 ## Debug events
 

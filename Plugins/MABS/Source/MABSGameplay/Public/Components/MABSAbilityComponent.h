@@ -6,13 +6,24 @@
 #include "Components/ActorComponent.h"
 #include "Debug/MABSAbilityDebugTypes.h"
 #include "GameplayTagContainer.h"
+#include "TimerManager.h"
 #include "Types/MABSAbilityTypes.h"
 #include "MABSAbilityComponent.generated.h"
 
 class AMABSProjectileBase;
 class AActor;
+class UAnimMontage;
+class USceneComponent;
+class USkeletalMeshComponent;
 class UMABSAbilityDefinition;
 struct FHitResult;
+
+struct FMABSAbilityExecutionContext
+{
+	FTimerHandle DeliveryTimerHandle;
+	FTimerHandle RecoveryTimerHandle;
+	bool bNotifyOwningClient = false;
+};
 
 UCLASS(ClassGroup=(MABS), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
 class MABSGAMEPLAY_API UMABSAbilityComponent : public UActorComponent
@@ -61,6 +72,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	FMABSTargetTraceDebugInfo GetLatestTargetTraceDebugInfo() const;
 
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Debug")
+	void SetDebugReplicationEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	bool IsDebugReplicationEnabled() const;
+
 protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Abilities", Transient, Replicated)
@@ -78,6 +95,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MABS|Debug", meta=(ClampMin="1"))
 	int32 MaxStoredDebugEvents = 32;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MABS|Debug", Replicated)
+	bool bReplicateDebugDataToOwningClient = true;
+
 private:
 
 	friend class AMABSProjectileBase;
@@ -91,9 +111,24 @@ private:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveTargetTraceDebugInfo(const FMABSTargetTraceDebugInfo& DebugInfo);
 
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayActivationMontage(UAnimMontage* Montage, float PlayRate);
+
 	EMABSAbilityActivationResult HandleTryActivateAbility(const FGameplayTag& AbilityTag, bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const;
+
+	EMABSAbilityActivationResult BeginAbilityStartup(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+
+	void TriggerScheduledAbilityDelivery(FMABSAbilityHandle AbilityHandle);
+
+	void BeginAbilityRecovery(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+
+	void CompleteAbilityRecovery(FMABSAbilityHandle AbilityHandle);
+
+	void ClearAbilityExecutionContext(FMABSAbilityHandle AbilityHandle, bool bResetRuntimeTimes);
+
+	void ClearAbilityRuntimeTimes(FMABSAbilitySpec& AbilitySpec);
 
 	EMABSAbilityActivationResult CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
@@ -202,7 +237,32 @@ private:
 
 	bool GetTargetTraceViewPoint(FVector& OutTraceStart, FRotator& OutTraceRotation, FString& OutViewPointDescription) const;
 
-	bool GetProjectileSpawnTransform(const UMABSAbilityDefinition& AbilityDefinition, FTransform& OutSpawnTransform, FString& OutDebugMessage) const;
+	bool GetProjectileSpawnTransform(
+		const UMABSAbilityDefinition& AbilityDefinition,
+		FTransform& OutSpawnTransform,
+		FString& OutDebugMessage,
+		bool bNotifyOwningClient);
+
+	float GetEffectiveDeliveryDelay(const UMABSAbilityDefinition& AbilityDefinition) const;
+
+	bool RequestAbilityMontagePlayback(const FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+
+	bool PlayActivationMontageLocally(UAnimMontage* Montage, float PlayRate) const;
+
+	USkeletalMeshComponent* ResolveAbilitySkeletalMeshComponent() const;
+
+	void PrepareSkeletalMeshForAbilitySocketQueries(USkeletalMeshComponent& SkeletalMeshComponent) const;
+
+	FVector ResolveMeleeTraceDirection() const;
+
+	bool TryResolveSocketTransform(const FName& SocketName, FTransform& OutSocketTransform, FString& OutComponentName) const;
+
+	bool ResolveDeliveryOriginTransform(
+		const UMABSAbilityDefinition& AbilityDefinition,
+		EMABSDeliveryMode DeliveryMode,
+		FTransform& OutOriginTransform,
+		FString& OutOriginDescription,
+		bool bNotifyOwningClient);
 
 	bool ValidateTargetActorForAbility(
 		const UMABSAbilityDefinition* AbilityDefinition,
@@ -218,4 +278,6 @@ private:
 	FMABSAbilityHandle MakeNextAbilityHandle();
 
 	int32 NextAbilityHandleValue = 1;
+
+	TMap<FMABSAbilityHandle, FMABSAbilityExecutionContext> ActiveAbilityExecutionContexts;
 };

@@ -21,8 +21,14 @@ public:
 	static FString FormatTargetTraceDebugInfo(const FMABSTargetTraceDebugInfo& DebugInfo);
 
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	static FString FormatAbilitySpecRuntimeSummary(const FMABSAbilitySpec& AbilitySpec, float CurrentWorldTimeSeconds);
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	static FLinearColor GetAbilityDebugEventColor(const FMABSAbilityDebugEvent& DebugEvent);
 
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	static FLinearColor GetTargetTraceDebugColor(const FMABSTargetTraceDebugInfo& DebugInfo);
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	static FLinearColor GetAbilitySpecRuntimeColor(const FMABSAbilitySpec& AbilitySpec, float CurrentWorldTimeSeconds);
 };

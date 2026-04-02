@@ -40,6 +40,18 @@ public:
 	UFUNCTION(BlueprintPure, Category="MABS|Abilities")
 	bool FindGrantedAbilitySpecByTag(FGameplayTag AbilityTag, FMABSAbilitySpec& OutAbilitySpec) const;
 
+	UFUNCTION(BlueprintPure, Category="MABS|Abilities")
+	float GetCooldownRemainingByTag(FGameplayTag AbilityTag) const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Abilities")
+	bool IsAbilityOnCooldown(FGameplayTag AbilityTag) const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Abilities")
+	float GetCooldownGroupRemaining(FGameplayTag CooldownGroupTag) const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Abilities")
+	bool IsCooldownGroupActive(FGameplayTag CooldownGroupTag) const;
+
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	TArray<FMABSAbilityDebugEvent> GetRecentDebugEvents() const;
 
@@ -50,6 +62,9 @@ protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Abilities", Transient, Replicated)
 	TArray<FMABSAbilitySpec> GrantedAbilities;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Abilities", Transient, Replicated)
+	TArray<FMABSCooldownGroupState> CooldownGroupStates;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Debug", Transient)
 	TArray<FMABSAbilityDebugEvent> RecentDebugEvents;
@@ -73,7 +88,7 @@ private:
 
 	EMABSAbilityActivationResult HandleTryActivateAbility(const FGameplayTag& AbilityTag, bool bNotifyOwningClient);
 
-	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec) const;
+	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const;
 
 	EMABSAbilityActivationResult CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
@@ -90,7 +105,23 @@ private:
 
 	FMABSAbilitySpec* FindGrantedAbilitySpecByHandle(const FMABSAbilityHandle& AbilityHandle);
 
+	FMABSCooldownGroupState* FindCooldownGroupStateMutable(const FGameplayTag& CooldownGroupTag);
+
+	const FMABSCooldownGroupState* FindCooldownGroupStateInternal(const FGameplayTag& CooldownGroupTag) const;
+
 	void ResetAbilityToIdle(FMABSAbilityHandle AbilityHandle);
+
+	void PruneExpiredCooldownGroupStates();
+
+	float GetCooldownRemainingForAbilitySpec(const FMABSAbilitySpec& AbilitySpec) const;
+
+	float GetCooldownGroupRemainingInternal(const FGameplayTag& CooldownGroupTag) const;
+
+	bool ShouldValidateAbilityCost(const FMABSAbilitySpec& AbilitySpec) const;
+
+	EMABSAbilityActivationResult SpendAbilityCost(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const;
+
+	void StartAbilityCooldowns(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
 	FMABSAbilityDebugEvent MakeDebugEvent(
 		FName EventName,

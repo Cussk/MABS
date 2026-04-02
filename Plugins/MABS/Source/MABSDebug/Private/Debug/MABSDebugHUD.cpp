@@ -59,6 +59,27 @@ void AMABSDebugHUD::DrawHUD()
 	Canvas->DrawItem(TraceItem);
 	CurrentY += 28.0f;
 
+	const float CurrentWorldTime = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0f;
+	const TArray<FMABSAbilitySpec> GrantedAbilities = AbilityComponent->GetGrantedAbilities();
+	const int32 AbilityCount = FMath::Min(MaxDisplayedAbilities, GrantedAbilities.Num());
+	for (int32 AbilityIndex = 0; AbilityIndex < AbilityCount; ++AbilityIndex)
+	{
+		const FMABSAbilitySpec& AbilitySpec = GrantedAbilities[AbilityIndex];
+		FCanvasTextItem AbilityItem(
+			FVector2D(LeftX, CurrentY),
+			FText::FromString(UMABSDebugBlueprintLibrary::FormatAbilitySpecRuntimeSummary(AbilitySpec, CurrentWorldTime)),
+			OverlayFont,
+			UMABSDebugBlueprintLibrary::GetAbilitySpecRuntimeColor(AbilitySpec, CurrentWorldTime));
+		AbilityItem.EnableShadow(FLinearColor::Black);
+		Canvas->DrawItem(AbilityItem);
+		CurrentY += LineHeight;
+	}
+
+	if (AbilityCount > 0)
+	{
+		CurrentY += 8.0f;
+	}
+
 	TArray<FMABSAbilityDebugEvent> RecentEvents = AbilityComponent->GetRecentDebugEvents();
 	const int32 EventCount = FMath::Min(MaxDisplayedEvents, RecentEvents.Num());
 	const int32 FirstEventIndex = RecentEvents.Num() - EventCount;

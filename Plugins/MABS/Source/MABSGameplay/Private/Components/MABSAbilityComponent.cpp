@@ -9,6 +9,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
+#include "Interfaces/MABSCostReceiver.h"
 #include "Interfaces/MABSInstantEffectReceiver.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -21,8 +22,13 @@ namespace MABSAbilityComponentEventNames
 	static const FName AbilityGrantRejected(TEXT("AbilityGrantRejected"));
 	static const FName AbilityUnblocked(TEXT("AbilityUnblocked"));
 	static const FName CommitSucceeded(TEXT("CommitSucceeded"));
+	static const FName CooldownRejected(TEXT("CooldownRejected"));
+	static const FName CooldownStarted(TEXT("CooldownStarted"));
 	static const FName EffectApplied(TEXT("EffectApplied"));
 	static const FName EffectApplicationFailed(TEXT("EffectApplicationFailed"));
+	static const FName CostRejected(TEXT("CostRejected"));
+	static const FName CostSpent(TEXT("CostSpent"));
+	static const FName CostValidated(TEXT("CostValidated"));
 	static const FName RequestAccepted(TEXT("RequestAccepted"));
 	static const FName RequestRejected(TEXT("RequestRejected"));
 	static const FName RequestSentToServer(TEXT("RequestSentToServer"));
@@ -51,6 +57,12 @@ namespace
 
 		case EMABSAbilityActivationResult::Blocked:
 			return TEXT("Activation rejected because the ability is currently blocked.");
+
+		case EMABSAbilityActivationResult::OnCooldown:
+			return TEXT("Activation rejected because the ability is on cooldown.");
+
+		case EMABSAbilityActivationResult::InsufficientResources:
+			return TEXT("Activation rejected because the owner cannot afford the resource cost.");
 
 		case EMABSAbilityActivationResult::AuthorityRejected:
 			return TEXT("Activation rejected because the request must be handled by authority.");
@@ -133,6 +145,21 @@ namespace
 		return Actor != nullptr ? GetNameSafe(Actor) : TEXT("World");
 	}
 
+	FName GetActivationFailureEventName(const EMABSAbilityActivationResult ActivationResult)
+	{
+		switch (ActivationResult)
+		{
+		case EMABSAbilityActivationResult::OnCooldown:
+			return MABSAbilityComponentEventNames::CooldownRejected;
+
+		case EMABSAbilityActivationResult::InsufficientResources:
+			return MABSAbilityComponentEventNames::CostRejected;
+
+		default:
+			return MABSAbilityComponentEventNames::RequestRejected;
+		}
+	}
+
 	FCollisionObjectQueryParams MakeTargetTraceObjectQueryParams(const UMABSAbilityDefinition& AbilityDefinition)
 	{
 		FCollisionObjectQueryParams ObjectQueryParams;
@@ -162,6 +189,7 @@ void UMABSAbilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(UMABSAbilityComponent, GrantedAbilities);
+	DOREPLIFETIME(UMABSAbilityComponent, CooldownGroupStates);
 }
 
 FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* AbilityDefinition)
@@ -222,6 +250,7 @@ FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* A
 	AbilitySpec.AbilityTag = AbilityDefinition->AbilityTag;
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 	AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::None;
+	AbilitySpec.CooldownEndTime = 0.0f;
 	GrantedAbilities.Add(AbilitySpec);
 
 	EmitDebugEvent(
@@ -356,6 +385,27 @@ bool UMABSAbilityComponent::FindGrantedAbilitySpecByTag(const FGameplayTag Abili
 	return false;
 }
 
+float UMABSAbilityComponent::GetCooldownRemainingByTag(const FGameplayTag AbilityTag) const
+{
+	const FMABSAbilitySpec* AbilitySpec = FindGrantedAbilitySpecByTagInternal(AbilityTag);
+	return AbilitySpec != nullptr ? GetCooldownRemainingForAbilitySpec(*AbilitySpec) : 0.0f;
+}
+
+bool UMABSAbilityComponent::IsAbilityOnCooldown(const FGameplayTag AbilityTag) const
+{
+	return GetCooldownRemainingByTag(AbilityTag) > 0.0f;
+}
+
+float UMABSAbilityComponent::GetCooldownGroupRemaining(const FGameplayTag CooldownGroupTag) const
+{
+	return GetCooldownGroupRemainingInternal(CooldownGroupTag);
+}
+
+bool UMABSAbilityComponent::IsCooldownGroupActive(const FGameplayTag CooldownGroupTag) const
+{
+	return GetCooldownGroupRemainingInternal(CooldownGroupTag) > 0.0f;
+}
+
 TArray<FMABSAbilityDebugEvent> UMABSAbilityComponent::GetRecentDebugEvents() const
 {
 	return RecentDebugEvents;
@@ -384,6 +434,8 @@ void UMABSAbilityComponent::ClientReceiveTargetTraceDebugInfo_Implementation(con
 EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(const FGameplayTag& AbilityTag, const bool bNotifyOwningClient)
 {
 	const FMABSAbilityHandle InvalidHandle;
+
+	PruneExpiredCooldownGroupStates();
 
 	if (!AbilityTag.IsValid())
 	{
@@ -428,24 +480,44 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(con
 		EMABSAbilityActivationResult::None,
 		TEXT("Authority started ability activation validation."));
 
-	const EMABSAbilityActivationResult ActivationResult = CanActivateAbility(*AbilitySpec);
+	FString ActivationDebugMessage;
+	const EMABSAbilityActivationResult ActivationResult = CanActivateAbility(*AbilitySpec, ActivationDebugMessage);
 	AbilitySpec->LastActivationResult = ActivationResult;
 
 	if (ActivationResult != EMABSAbilityActivationResult::Success)
 	{
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::RequestRejected,
+			GetActivationFailureEventName(ActivationResult),
 			AbilitySpec->AbilityTag,
 			AbilitySpec->Handle,
 			AbilitySpec->RuntimeState,
 			ActivationResult,
-			DescribeActivationResult(ActivationResult));
+			ActivationDebugMessage.IsEmpty() ? DescribeActivationResult(ActivationResult) : ActivationDebugMessage);
 		if (bNotifyOwningClient)
 		{
 			EmitDebugEventToOwningClient(DebugEvent);
 		}
 
 		return ActivationResult;
+	}
+
+	if (ShouldValidateAbilityCost(*AbilitySpec))
+	{
+		const FString CostValidatedMessage = FString::Printf(
+			TEXT("Validated resource cost %.2f for ability '%s'."),
+			AbilitySpec->AbilityDefinition->ResourceCost,
+			*GetAbilityLabel(AbilitySpec->AbilityDefinition));
+		const FMABSAbilityDebugEvent CostValidatedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::CostValidated,
+			AbilitySpec->AbilityTag,
+			AbilitySpec->Handle,
+			AbilitySpec->RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			CostValidatedMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(CostValidatedEvent);
+		}
 	}
 
 	const FMABSAbilityDebugEvent AcceptedEvent = EmitDebugEvent(
@@ -463,33 +535,38 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(con
 	return CommitAbility(*AbilitySpec, bNotifyOwningClient);
 }
 
-EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMABSAbilitySpec& AbilitySpec) const
+EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const
 {
 	if (AbilitySpec.AbilityDefinition == nullptr || !AbilitySpec.AbilityTag.IsValid())
 	{
+		OutDebugMessage = TEXT("Activation rejected because the ability spec is missing a valid definition or tag.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
 	if (AbilitySpec.AbilityDefinition->AbilityTag != AbilitySpec.AbilityTag)
 	{
+		OutDebugMessage = TEXT("Activation rejected because the granted ability tag no longer matches the authored definition.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
 	if (AbilitySpec.AbilityDefinition->TargetType != EMABSTargetType::Self
 		&& AbilitySpec.AbilityDefinition->TargetType != EMABSTargetType::Actor)
 	{
+		OutDebugMessage = TEXT("Activation rejected because the authored target type is not supported.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
 	if (AbilitySpec.AbilityDefinition->InstantEffectType == EMABSInstantEffectType::None
 		|| AbilitySpec.AbilityDefinition->EffectMagnitude <= 0.0f)
 	{
+		OutDebugMessage = TEXT("Activation rejected because the authored instant effect is invalid.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
 	if (AbilitySpec.AbilityDefinition->TargetType == EMABSTargetType::Actor
 		&& AbilitySpec.AbilityDefinition->TargetTraceDistance <= 0.0f)
 	{
+		OutDebugMessage = TEXT("Activation rejected because actor targeting requires a positive trace distance.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
@@ -497,6 +574,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 		&& AbilitySpec.AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
 		&& AbilitySpec.AbilityDefinition->TargetTraceRadius <= 0.0f)
 	{
+		OutDebugMessage = TEXT("Activation rejected because sphere traces require a positive trace radius.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
@@ -508,6 +586,57 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 	if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Blocked)
 	{
 		return EMABSAbilityActivationResult::Blocked;
+	}
+
+	const float AbilityCooldownRemaining = GetCooldownRemainingForAbilitySpec(AbilitySpec);
+	if (AbilityCooldownRemaining > 0.0f)
+	{
+		const FGameplayTag CooldownGroupTag = AbilitySpec.AbilityDefinition->CooldownGroupTag;
+		if (CooldownGroupTag.IsValid())
+		{
+			const float GroupCooldownRemaining = GetCooldownGroupRemainingInternal(CooldownGroupTag);
+			if (GroupCooldownRemaining > 0.0f)
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Activation rejected because cooldown group '%s' is active for %.2f more seconds."),
+					*CooldownGroupTag.ToString(),
+					GroupCooldownRemaining);
+				return EMABSAbilityActivationResult::OnCooldown;
+			}
+		}
+
+		OutDebugMessage = FString::Printf(
+			TEXT("Activation rejected because ability '%s' is on cooldown for %.2f more seconds."),
+			*GetAbilityLabel(AbilitySpec.AbilityDefinition),
+			AbilityCooldownRemaining);
+		return EMABSAbilityActivationResult::OnCooldown;
+	}
+
+	if (ShouldValidateAbilityCost(AbilitySpec))
+	{
+		AActor* const Owner = GetOwner();
+		if (Owner == nullptr || !Owner->GetClass()->ImplementsInterface(UMABSCostReceiver::StaticClass()))
+		{
+			OutDebugMessage = FString::Printf(
+				TEXT("Activation rejected because owner '%s' does not implement IMABSCostReceiver for resource cost %.2f."),
+				*GetNameSafe(Owner),
+				AbilitySpec.AbilityDefinition->ResourceCost);
+			return EMABSAbilityActivationResult::InsufficientResources;
+		}
+
+		const bool bCanAffordCost = IMABSCostReceiver::Execute_CanAffordMABSCost(
+			Owner,
+			AbilitySpec.AbilityDefinition->ResourceCost,
+			AbilitySpec.AbilityDefinition);
+		if (!bCanAffordCost)
+		{
+			OutDebugMessage = FString::Printf(
+				TEXT("Activation rejected because owner '%s' cannot afford resource cost %.2f for ability '%s'."),
+				*GetNameSafe(Owner),
+				AbilitySpec.AbilityDefinition->ResourceCost,
+				*GetAbilityLabel(AbilitySpec.AbilityDefinition));
+			return EMABSAbilityActivationResult::InsufficientResources;
+		}
 	}
 
 	return EMABSAbilityActivationResult::Success;
@@ -575,8 +704,6 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 		return EffectResult;
 	}
 
-	AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::Success;
-
 	const FMABSAbilityDebugEvent EffectAppliedEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::EffectApplied,
 		AbilitySpec.AbilityTag,
@@ -588,6 +715,46 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 	{
 		EmitDebugEventToOwningClient(EffectAppliedEvent);
 	}
+
+	FString CostDebugMessage;
+	const EMABSAbilityActivationResult CostSpendResult = SpendAbilityCost(AbilitySpec, CostDebugMessage);
+	if (CostSpendResult != EMABSAbilityActivationResult::Success)
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = CostSpendResult;
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::CostRejected,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			CostSpendResult,
+			CostDebugMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		return CostSpendResult;
+	}
+
+	if (ShouldValidateAbilityCost(AbilitySpec))
+	{
+		const FMABSAbilityDebugEvent CostSpentEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::CostSpent,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			CostDebugMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(CostSpentEvent);
+		}
+	}
+
+	StartAbilityCooldowns(AbilitySpec, bNotifyOwningClient);
+	AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::Success;
 
 	const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::CommitSucceeded,
@@ -953,6 +1120,112 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
 	}
 }
 
+bool UMABSAbilityComponent::ShouldValidateAbilityCost(const FMABSAbilitySpec& AbilitySpec) const
+{
+	return AbilitySpec.AbilityDefinition != nullptr && AbilitySpec.AbilityDefinition->ResourceCost > 0.0f;
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::SpendAbilityCost(
+	const FMABSAbilitySpec& AbilitySpec,
+	FString& OutDebugMessage) const
+{
+	if (!ShouldValidateAbilityCost(AbilitySpec))
+	{
+		OutDebugMessage = TEXT("No resource cost was authored for this ability.");
+		return EMABSAbilityActivationResult::Success;
+	}
+
+	AActor* const Owner = GetOwner();
+	if (Owner == nullptr || !Owner->GetClass()->ImplementsInterface(UMABSCostReceiver::StaticClass()))
+	{
+		OutDebugMessage = FString::Printf(
+			TEXT("Failed to spend resource cost %.2f because owner '%s' does not implement IMABSCostReceiver."),
+			AbilitySpec.AbilityDefinition->ResourceCost,
+			*GetNameSafe(Owner));
+		return EMABSAbilityActivationResult::InsufficientResources;
+	}
+
+	const bool bSpentCost = IMABSCostReceiver::Execute_SpendMABSCost(
+		Owner,
+		AbilitySpec.AbilityDefinition->ResourceCost,
+		AbilitySpec.AbilityDefinition);
+	if (!bSpentCost)
+	{
+		OutDebugMessage = FString::Printf(
+			TEXT("Failed to spend resource cost %.2f for ability '%s'."),
+			AbilitySpec.AbilityDefinition->ResourceCost,
+			*GetAbilityLabel(AbilitySpec.AbilityDefinition));
+		return EMABSAbilityActivationResult::InsufficientResources;
+	}
+
+	OutDebugMessage = FString::Printf(
+		TEXT("Spent resource cost %.2f for ability '%s'."),
+		AbilitySpec.AbilityDefinition->ResourceCost,
+		*GetAbilityLabel(AbilitySpec.AbilityDefinition));
+	return EMABSAbilityActivationResult::Success;
+}
+
+void UMABSAbilityComponent::StartAbilityCooldowns(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	UWorld* const World = GetWorld();
+	if (AbilityDefinition == nullptr || World == nullptr)
+	{
+		return;
+	}
+
+	PruneExpiredCooldownGroupStates();
+
+	const float CooldownDuration = FMath::Max(0.0f, AbilityDefinition->CooldownSeconds);
+	const float CooldownEndTime = CooldownDuration > 0.0f ? World->GetTimeSeconds() + CooldownDuration : 0.0f;
+	AbilitySpec.CooldownEndTime = CooldownEndTime;
+
+	FString CooldownMessage;
+	if (CooldownDuration > 0.0f)
+	{
+		if (AbilityDefinition->CooldownGroupTag.IsValid())
+		{
+			FMABSCooldownGroupState* CooldownGroupState = FindCooldownGroupStateMutable(AbilityDefinition->CooldownGroupTag);
+			if (CooldownGroupState == nullptr)
+			{
+				FMABSCooldownGroupState NewCooldownGroupState;
+				NewCooldownGroupState.CooldownGroupTag = AbilityDefinition->CooldownGroupTag;
+				NewCooldownGroupState.CooldownEndTime = CooldownEndTime;
+				CooldownGroupStates.Add(NewCooldownGroupState);
+			}
+			else
+			{
+				CooldownGroupState->CooldownEndTime = FMath::Max(CooldownGroupState->CooldownEndTime, CooldownEndTime);
+			}
+
+			CooldownMessage = FString::Printf(
+				TEXT("Started cooldown for ability '%s' for %.2f seconds. Cooldown group '%s' is now active."),
+				*GetAbilityLabel(AbilityDefinition),
+				CooldownDuration,
+				*AbilityDefinition->CooldownGroupTag.ToString());
+		}
+		else
+		{
+			CooldownMessage = FString::Printf(
+				TEXT("Started cooldown for ability '%s' for %.2f seconds."),
+				*GetAbilityLabel(AbilityDefinition),
+				CooldownDuration);
+		}
+
+		const FMABSAbilityDebugEvent CooldownStartedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::CooldownStarted,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			CooldownMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(CooldownStartedEvent);
+		}
+	}
+}
+
 FMABSAbilitySpec* UMABSAbilityComponent::FindGrantedAbilitySpecByTagMutable(const FGameplayTag& AbilityTag)
 {
 	return GrantedAbilities.FindByPredicate(
@@ -980,6 +1253,24 @@ FMABSAbilitySpec* UMABSAbilityComponent::FindGrantedAbilitySpecByHandle(const FM
 		});
 }
 
+FMABSCooldownGroupState* UMABSAbilityComponent::FindCooldownGroupStateMutable(const FGameplayTag& CooldownGroupTag)
+{
+	return CooldownGroupStates.FindByPredicate(
+		[&CooldownGroupTag](const FMABSCooldownGroupState& CooldownGroupState)
+		{
+			return CooldownGroupState.CooldownGroupTag == CooldownGroupTag;
+		});
+}
+
+const FMABSCooldownGroupState* UMABSAbilityComponent::FindCooldownGroupStateInternal(const FGameplayTag& CooldownGroupTag) const
+{
+	return CooldownGroupStates.FindByPredicate(
+		[&CooldownGroupTag](const FMABSCooldownGroupState& CooldownGroupState)
+		{
+			return CooldownGroupState.CooldownGroupTag == CooldownGroupTag;
+		});
+}
+
 void UMABSAbilityComponent::ResetAbilityToIdle(const FMABSAbilityHandle AbilityHandle)
 {
 	FMABSAbilitySpec* AbilitySpec = FindGrantedAbilitySpecByHandle(AbilityHandle);
@@ -992,6 +1283,62 @@ void UMABSAbilityComponent::ResetAbilityToIdle(const FMABSAbilityHandle AbilityH
 	{
 		AbilitySpec->RuntimeState = EMABSAbilityRuntimeState::Idle;
 	}
+}
+
+void UMABSAbilityComponent::PruneExpiredCooldownGroupStates()
+{
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	const float CurrentWorldTime = World->GetTimeSeconds();
+	CooldownGroupStates.RemoveAll(
+		[CurrentWorldTime](const FMABSCooldownGroupState& CooldownGroupState)
+		{
+			return !CooldownGroupState.CooldownGroupTag.IsValid() || CooldownGroupState.CooldownEndTime <= CurrentWorldTime;
+		});
+}
+
+float UMABSAbilityComponent::GetCooldownRemainingForAbilitySpec(const FMABSAbilitySpec& AbilitySpec) const
+{
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return 0.0f;
+	}
+
+	const float CurrentWorldTime = World->GetTimeSeconds();
+	const float AbilityCooldownRemaining = FMath::Max(0.0f, AbilitySpec.CooldownEndTime - CurrentWorldTime);
+	if (AbilitySpec.AbilityDefinition == nullptr || !AbilitySpec.AbilityDefinition->CooldownGroupTag.IsValid())
+	{
+		return AbilityCooldownRemaining;
+	}
+
+	return FMath::Max(AbilityCooldownRemaining, GetCooldownGroupRemainingInternal(AbilitySpec.AbilityDefinition->CooldownGroupTag));
+}
+
+float UMABSAbilityComponent::GetCooldownGroupRemainingInternal(const FGameplayTag& CooldownGroupTag) const
+{
+	if (!CooldownGroupTag.IsValid())
+	{
+		return 0.0f;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return 0.0f;
+	}
+
+	const FMABSCooldownGroupState* CooldownGroupState = FindCooldownGroupStateInternal(CooldownGroupTag);
+	if (CooldownGroupState == nullptr)
+	{
+		return 0.0f;
+	}
+
+	return FMath::Max(0.0f, CooldownGroupState->CooldownEndTime - World->GetTimeSeconds());
 }
 
 FMABSAbilityDebugEvent UMABSAbilityComponent::MakeDebugEvent(

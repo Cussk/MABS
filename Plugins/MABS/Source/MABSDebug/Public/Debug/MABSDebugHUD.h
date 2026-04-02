@@ -36,11 +36,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MABS|Debug", meta=(ClampMin="1"))
 	int32 MaxDisplayedEvents = 6;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MABS|Debug", meta=(ClampMin="1"))
+	int32 MaxDisplayedAbilities = 4;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MABS|Debug")
 	FVector2D OverlayPosition = FVector2D(24.0f, 24.0f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MABS|Debug")
-	FVector2D OverlaySize = FVector2D(900.0f, 260.0f);
+	FVector2D OverlaySize = FVector2D(900.0f, 340.0f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MABS|Debug")
 	FLinearColor OverlayBackgroundColor = FLinearColor(0.03f, 0.04f, 0.05f, 0.72f);

@@ -2,20 +2,20 @@
 
 ## What it is
 
-This document explains the Phase 2 instant effect model for MABS.
+This document explains the current instant effect model for MABS.
 
 ## Why it exists
 
-Activation is only useful if it leads to a gameplay outcome. Phase 2 adds a deliberately small, server-authoritative effect slice without introducing a full attribute or gameplay-effect framework.
+Activation is only useful if it leads to a gameplay outcome. Phase 2 introduced the deliberately small, server-authoritative effect slice, and Phase 3 keeps that slice while adding cooldown and cost rules around it.
 
 ## Supported instant effects
 
-Phase 2 supports:
+Current support:
 
 * `Damage`
 * `Heal`
 
-These are one-shot, immediate effects applied on authority after target resolution succeeds.
+These are one-shot, immediate effects applied on authority after target resolution succeeds. In Phase 3, successful ability usage may also spend cost and start cooldown after the effect succeeds.
 
 ## Damage
 
@@ -55,7 +55,7 @@ How to use it:
 
 Example:
 
-* the current host-project `AMABSCharacter` implements the interface and accepts self-heal for the Phase 2 harness
+* the current host-project `AMABSCharacter` implements the interface and accepts self-heal for the current harness
 
 ## Failure behavior
 

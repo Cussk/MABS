@@ -18,6 +18,8 @@ enum class EMABSAbilityActivationResult : uint8
 	NotGranted UMETA(DisplayName="Not Granted"),
 	AlreadyActive UMETA(DisplayName="Already Active"),
 	Blocked UMETA(DisplayName="Blocked"),
+	OnCooldown UMETA(DisplayName="On Cooldown"),
+	InsufficientResources UMETA(DisplayName="Insufficient Resources"),
 	AuthorityRejected UMETA(DisplayName="Authority Rejected"),
 	TargetResolutionFailed UMETA(DisplayName="Target Resolution Failed"),
 	EffectApplicationFailed UMETA(DisplayName="Effect Application Failed")
@@ -118,4 +120,19 @@ struct MABSCORE_API FMABSAbilitySpec
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
 	EMABSAbilityActivationResult LastActivationResult = EMABSAbilityActivationResult::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	float CooldownEndTime = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSCooldownGroupState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	FGameplayTag CooldownGroupTag;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	float CooldownEndTime = 0.0f;
 };

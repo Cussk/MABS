@@ -57,6 +57,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))
 	float CooldownSeconds = 0.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
+	FGameplayTag CooldownGroupTag;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))
 	float ResourceCost = 0.0f;
 };

@@ -48,6 +48,7 @@ AMABSCharacter::AMABSCharacter()
 	FollowCamera->bUsePawnControlRotation = false;
 
 	CurrentExampleHealth = MaxExampleHealth;
+	CurrentExampleResource = MaxExampleResource;
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
@@ -58,6 +59,7 @@ void AMABSCharacter::BeginPlay()
 	Super::BeginPlay();
 
 	CurrentExampleHealth = MaxExampleHealth;
+	CurrentExampleResource = MaxExampleResource;
 }
 
 void AMABSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -147,6 +149,11 @@ float AMABSCharacter::GetExampleHealthNormalized() const
 	return MaxExampleHealth > 0.0f ? CurrentExampleHealth / MaxExampleHealth : 0.0f;
 }
 
+float AMABSCharacter::GetExampleResourceNormalized() const
+{
+	return MaxExampleResource > 0.0f ? CurrentExampleResource / MaxExampleResource : 0.0f;
+}
+
 float AMABSCharacter::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
 	const float AppliedDamage = FMath::Max(0.0f, Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser));
@@ -167,5 +174,26 @@ bool AMABSCharacter::ApplyMABSHeal_Implementation(float HealAmount, AActor* Sour
 	}
 
 	CurrentExampleHealth = FMath::Clamp(CurrentExampleHealth + HealAmount, 0.0f, MaxExampleHealth);
+	return true;
+}
+
+bool AMABSCharacter::CanAffordMABSCost_Implementation(float Cost, UMABSAbilityDefinition* SourceAbility)
+{
+	return Cost <= 0.0f || CurrentExampleResource >= Cost;
+}
+
+bool AMABSCharacter::SpendMABSCost_Implementation(float Cost, UMABSAbilityDefinition* SourceAbility)
+{
+	if (Cost <= 0.0f)
+	{
+		return true;
+	}
+
+	if (CurrentExampleResource < Cost)
+	{
+		return false;
+	}
+
+	CurrentExampleResource = FMath::Clamp(CurrentExampleResource - Cost, 0.0f, MaxExampleResource);
 	return true;
 }

@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document lists the current Phase 2.5 public surface for MABS and shows which module owns authored data, runtime state, target debugging, execution, and overlay helpers.
+This document lists the current Phase 3 public surface for MABS and shows which module owns authored data, runtime state, cooldown data, cost integration, execution, and debug helpers.
 
 ## Why it exists
 
-Phase 2.5 keeps the existing multiplayer-safe activation flow, then adds configurable actor targeting, richer target trace visibility, and a runtime-safe debug overlay. Users need a clear map of the new authored fields, runtime state, and helper types.
+Phase 3 keeps the multiplayer-safe activation flow from earlier phases, then adds cooldown execution, cooldown groups, and resource cost spending. Users need a clear map of the new authored fields, runtime structs, interfaces, and query helpers.
 
 ## Module ownership
 
@@ -22,6 +22,7 @@ Owns foundational runtime data:
 * `EMABSInstantEffectType`
 * `FMABSAbilityHandle`
 * `FMABSAbilitySpec`
+* `FMABSCooldownGroupState`
 * `FMABSAbilityDebugEvent`
 * `FMABSTargetTraceDebugInfo`
 * `UMABSAbilityDefinition`
@@ -33,6 +34,7 @@ Owns gameplay execution:
 
 * `UMABSAbilityComponent`
 * `IMABSInstantEffectReceiver`
+* `IMABSCostReceiver`
 
 ### `MABSDebug`
 
@@ -56,6 +58,8 @@ Current values:
 * `NotGranted`
 * `AlreadyActive`
 * `Blocked`
+* `OnCooldown`
+* `InsufficientResources`
 * `AuthorityRejected`
 * `TargetResolutionFailed`
 * `EffectApplicationFailed`
@@ -79,8 +83,6 @@ Current supported values:
 
 * `Self`
 * `Actor`
-
-`Location` remains present in the enum but is still out of scope.
 
 ### `EMABSTargetTraceMode`
 
@@ -127,6 +129,16 @@ Current fields:
 * `AbilityTag`
 * `RuntimeState`
 * `LastActivationResult`
+* `CooldownEndTime`
+
+### `FMABSCooldownGroupState`
+
+Represents one shared cooldown-group runtime entry on the owning component.
+
+Current fields:
+
+* `CooldownGroupTag`
+* `CooldownEndTime`
 
 ### `FMABSAbilityDebugEvent`
 
@@ -135,25 +147,6 @@ A structured debug payload emitted by the ability component. It records the even
 ### `FMABSTargetTraceDebugInfo`
 
 A structured snapshot of the latest actor-target trace for the owning actor.
-
-Current fields:
-
-* `bHasTraceData`
-* `bHit`
-* `bAcceptedTarget`
-* `AbilityTag`
-* `AbilityHandle`
-* `TraceMode`
-* `TraceStart`
-* `TraceEnd`
-* `HitLocation`
-* `TraceRadius`
-* `HitDistance`
-* `WorldTimeSeconds`
-* `ViewPointDescription`
-* `HitActorName`
-* `HitComponentName`
-* `ResultMessage`
 
 ## Classes
 
@@ -177,11 +170,12 @@ Current authored fields:
 * `bDrawTargetTraceDebug`
 * `TargetTraceDebugDuration`
 * `CooldownSeconds`
+* `CooldownGroupTag`
 * `ResourceCost`
 
 ### `UMABSAbilityComponent`
 
-A `UActorComponent` that owns granted ability specs, routes activation requests, resolves targets, applies instant effects, emits debug events, and stores the latest target trace snapshot.
+A `UActorComponent` that owns granted ability specs, routes activation requests, validates cooldown and cost rules, resolves targets, applies instant effects, emits debug events, and stores shared cooldown-group state.
 
 Current public functions:
 
@@ -190,24 +184,25 @@ Current public functions:
 * `TryActivateAbilityByTag(FGameplayTag AbilityTag)`
 * `GetGrantedAbilities()`
 * `FindGrantedAbilitySpecByTag(FGameplayTag AbilityTag, FMABSAbilitySpec& OutAbilitySpec)`
+* `GetCooldownRemainingByTag(FGameplayTag AbilityTag)`
+* `IsAbilityOnCooldown(FGameplayTag AbilityTag)`
+* `GetCooldownGroupRemaining(FGameplayTag CooldownGroupTag)`
+* `IsCooldownGroupActive(FGameplayTag CooldownGroupTag)`
 * `GetRecentDebugEvents()`
 * `GetLatestTargetTraceDebugInfo()`
 
 Current replicated state:
 
 * `GrantedAbilities`
+* `CooldownGroupStates`
 
-Current public events:
+Important new debug event names:
 
-* `OnAbilityDebugEvent`
-
-Important target-related event names:
-
-* `TargetTraceStarted`
-* `TargetTraceHit`
-* `TargetTraceRejected`
-* `TargetResolved`
-* `TargetResolutionFailed`
+* `CooldownRejected`
+* `CooldownStarted`
+* `CostValidated`
+* `CostRejected`
+* `CostSpent`
 
 ### `IMABSInstantEffectReceiver`
 
@@ -217,6 +212,15 @@ Current public function:
 
 * `ApplyMABSHeal(float HealAmount, AActor* SourceActor, UMABSAbilityDefinition* SourceAbility)`
 
+### `IMABSCostReceiver`
+
+A minimal optional extension hook for validating and spending resource cost.
+
+Current public functions:
+
+* `CanAffordMABSCost(float Cost, UMABSAbilityDefinition* SourceAbility)`
+* `SpendMABSCost(float Cost, UMABSAbilityDefinition* SourceAbility)`
+
 ### `UMABSDebugBlueprintLibrary`
 
 A runtime-safe helper library for debug consumers.
@@ -225,33 +229,29 @@ Current public functions:
 
 * `FormatAbilityDebugEvent(const FMABSAbilityDebugEvent& DebugEvent)`
 * `FormatTargetTraceDebugInfo(const FMABSTargetTraceDebugInfo& DebugInfo)`
+* `FormatAbilitySpecRuntimeSummary(const FMABSAbilitySpec& AbilitySpec, float CurrentWorldTimeSeconds)`
 * `GetAbilityDebugEventColor(const FMABSAbilityDebugEvent& DebugEvent)`
 * `GetTargetTraceDebugColor(const FMABSTargetTraceDebugInfo& DebugInfo)`
+* `GetAbilitySpecRuntimeColor(const FMABSAbilitySpec& AbilitySpec, float CurrentWorldTimeSeconds)`
 
 ### `AMABSDebugHUD`
 
 A lightweight runtime HUD overlay that reads the local owner’s `UMABSAbilityComponent` and displays:
 
 * the latest target trace snapshot
+* granted ability runtime summaries
 * a recent debug event list
-* simple color-coded success and failure feedback
-
-Current public functions:
-
-* `SetOverlayEnabled(bool bEnabled)`
-* `ToggleOverlayEnabled()`
-* `IsOverlayEnabled()`
 
 ## How to use it
 
 1. Enable the `MABS` plugin.
 2. Create a `UMABSAbilityDefinition` asset with a valid `AbilityTag`.
-3. Set `TargetType`, `InstantEffectType`, `EffectMagnitude`, and the Phase 2.5 actor-target trace options when using `Actor`.
+3. Set `TargetType`, `InstantEffectType`, `EffectMagnitude`, and the Phase 3 cooldown and cost options.
 4. Add `UMABSAbilityComponent` to the owning actor or character.
-5. Grant the definition on the authoritative owner with `GrantAbility`.
-6. Call `TryActivateAbilityByTag` from input or gameplay code.
-7. Inspect `GetRecentDebugEvents()` and `GetLatestTargetTraceDebugInfo()`.
-8. Use `AMABSDebugHUD` or the debug library helpers to present the data at runtime.
+5. Implement `IMABSCostReceiver` on the owner if `ResourceCost > 0`.
+6. Grant the definition on the authoritative owner with `GrantAbility`.
+7. Call `TryActivateAbilityByTag` from input or gameplay code.
+8. Inspect cooldown query helpers, recent debug events, and the overlay.
 
 ## Example
 
@@ -266,8 +266,8 @@ if (AbilityComponent != nullptr && HasAuthority())
 const EMABSAbilityActivationResult Result =
 	AbilityComponent->TryActivateAbilityByTag(SelfHealTag);
 
-const FMABSTargetTraceDebugInfo TraceInfo =
-	AbilityComponent->GetLatestTargetTraceDebugInfo();
+const float CooldownRemaining =
+	AbilityComponent->GetCooldownRemainingByTag(SelfHealTag);
 ```
 
-In standalone or on the listen server host, a valid granted self-heal ability resolves the owner, applies the heal, and returns `Success`. For an actor-targeted damage ability, the authority path also emits `TargetTraceStarted`, records the latest trace snapshot, validates the candidate target, and then applies the effect. On a remote client, the local call still returns `RequestSentToServer`, then the owning client receives the authoritative target, effect, commit, and trace-debug data.
+In standalone or on the listen server host, a valid granted ability can now be denied by cooldown or cost before target/effect execution. After a successful commit, the authority path spends cost, starts cooldown, updates replicated runtime state, and emits the matching debug events. On a remote client, the local call still returns `RequestSentToServer`, then the owning client receives the authoritative denial or success information from the server.

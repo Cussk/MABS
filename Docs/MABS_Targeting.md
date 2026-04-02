@@ -2,45 +2,43 @@
 
 ## What it is
 
-This document explains the current Phase 2.5 targeting model for MABS.
+This document explains the current target-intent model for MABS after Phase 4.
 
 ## Why it exists
 
-Phase 2 proved that server-authoritative target resolution worked, but the first `Actor` targeting slice was still easy to mistrust during playtesting. Phase 2.5 improves that path without expanding into a full combat targeting framework.
+Phase 4 adds delivery, but target intent and delivery are still separate concepts. Keeping them separate makes authored data easier to reason about.
 
-## Supported target types
+## Current target intent
 
-Phase 2.5 supports:
+MABS still authors target intent through `TargetType`.
+
+Current supported target intent values:
 
 * `Self`
 * `Actor`
 
-`Location` is still out of scope for this phase.
+`Location` remains out of scope.
 
-## How `Self` works
+## How target intent works now
 
-`Self` resolves the owning actor directly on authority.
+### `Self`
 
-This remains the simplest path and is ideal for:
+Used with `Direct` delivery for simple self-targeted abilities such as self-heal.
 
-* self-heal
-* self-buff placeholders in future phases
-* first-pass validation
+### `Actor`
 
-## How `Actor` works now
+Used for:
 
-`Actor` resolves a single actor target on authority through a configurable trace.
+* direct actor-targeted abilities
+* hit-trace delivery
+* melee delivery
+* projectile delivery
 
-Phase 2.5 improvements:
+## Direct targeting
 
-* `ActorTargetTraceMode` supports `Line` and `Sphere`
-* aim direction comes from the controller viewpoint when possible
-* the actual gameplay trace starts from `GetActorEyesViewPoint`, which keeps the query near the owner instead of behind a third-person camera boom
-* target validation is centralized in gameplay code
-* trace attempts emit richer debug events
-* the latest trace snapshot is stored for runtime overlay use
+`DeliveryMode = Direct` keeps the existing target-resolution path.
 
-Relevant authored fields:
+For direct actor targeting, authored fields are still:
 
 * `TargetTraceDistance`
 * `ActorTargetTraceMode`
@@ -48,96 +46,36 @@ Relevant authored fields:
 * `bRequireValidActorTarget`
 * `bIgnoreNonTargetWorldHits`
 
-Recommended defaults for a general-purpose actor-target ability:
+## Delivery targeting
 
-* `ActorTargetTraceMode = Sphere`
-* `TargetTraceRadius = 50`
-* `bRequireValidActorTarget = true`
-* `bIgnoreNonTargetWorldHits = true`
+When `DeliveryMode` is not `Direct`, the delivery step resolves the final actor:
 
-## Valid-target rules
+* `HitTrace` resolves the first valid trace hit
+* `Melee` resolves the first valid short-range sweep hit
+* `Projectile` resolves the actor on authoritative impact
 
-When `bRequireValidActorTarget` is enabled, MABS validates the hit actor before target resolution succeeds.
+## Validation rules
 
-Current Phase 2.5 rules:
+Current valid-target rules remain lightweight:
 
-* self is rejected for `Actor` targeting
-* damage abilities accept actors that can be damaged or are pawns
-* heal abilities accept actors that implement `IMABSInstantEffectReceiver`
-
-This keeps validation centralized while staying lightweight.
-
-## World-hit behavior
-
-If the trace hits world geometry or another non-target result:
-
-* MABS emits a readable rejection event
-* the latest trace snapshot stores the rejection reason
-* if `bIgnoreNonTargetWorldHits` is enabled, the trace can continue evaluating later hits returned by the same query
-
-This improves feedback when the trace shape brushes floor or environment during testing.
+* self is rejected for actor-targeted hostile delivery
+* damage accepts damageable actors or pawns
+* heal accepts actors implementing `IMABSInstantEffectReceiver`
 
 ## Debug visibility
 
-Phase 2.5 actor targeting adds:
+Use:
 
-* `TargetTraceStarted`
-* `TargetTraceHit`
-* `TargetTraceRejected`
-* `TargetResolved`
-* `TargetResolutionFailed`
+* `GetLatestTargetTraceDebugInfo()`
+* `TargetTraceStarted`, `TargetTraceHit`, `TargetTraceRejected`
+* `HitTraceHit`, `HitTraceRejected`
+* `MeleeHit`, `MeleeRejected`
 
-If `bDrawTargetTraceDebug` is enabled, MABS also draws:
+## Not included
 
-* the trace line
-* start and end spheres for sphere traces
-* a hit marker
-* a text label with the accept or reject reason
+This phase still does not add:
 
-The owning component stores the latest trace snapshot in `GetLatestTargetTraceDebugInfo()`.
-
-## Failure behavior
-
-If no valid actor is found for `Actor` targeting:
-
-* the request fails cleanly
-* `LastActivationResult` becomes `TargetResolutionFailed`
-* `TargetTraceRejected` and/or `TargetResolutionFailed` explain the reason
-* the latest trace snapshot records what was hit and why it was rejected
-
-## How to use it
-
-1. Open a `UMABSAbilityDefinition`.
-2. Set `TargetType` to `Self` or `Actor`.
-3. If using `Actor`, set `TargetTraceDistance`.
-4. Choose `ActorTargetTraceMode`.
-5. If using `Sphere`, set `TargetTraceRadius` to a non-zero value.
-6. Decide whether `bRequireValidActorTarget` and `bIgnoreNonTargetWorldHits` should be enabled.
-7. Optionally enable `bDrawTargetTraceDebug`.
-8. Grant the ability on authority.
-9. Activate it and inspect the resulting events and latest trace snapshot.
-
-## Example
-
-Example actor-targeted damage setup:
-
-1. Create `DA_Test_Fireball`.
-2. Set `TargetType` to `Actor`.
-3. Set `TargetTraceDistance` to `1500`.
-4. Set `ActorTargetTraceMode` to `Sphere`.
-5. Set `TargetTraceRadius` to `50`.
-6. Enable `bRequireValidActorTarget`, `bIgnoreNonTargetWorldHits`, and `bDrawTargetTraceDebug`.
-7. Face a valid actor target in front of the owner.
-8. Call `TryActivateAbilityByTag(Test.Ability.Fireball)`.
-9. Observe `TargetTraceStarted`, then either `TargetTraceHit` plus `TargetResolved`, or `TargetTraceRejected` plus `TargetResolutionFailed`.
-
-## Not included in this phase
-
-Phase 2.5 still does not add:
-
-* AoE targeting
 * location targeting
-* projectiles
-* team or faction filters
+* AoE targeting
+* team filters
 * advanced target query objects
-* a full combat targeting framework

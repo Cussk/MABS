@@ -8,6 +8,8 @@
 #include "Types/MABSAbilityTypes.h"
 #include "MABSAbilityDefinition.generated.h"
 
+class AActor;
+
 UCLASS(BlueprintType)
 class MABSCORE_API UMABSAbilityDefinition : public UDataAsset
 {
@@ -23,6 +25,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	EMABSAbilityActivationPolicy ActivationPolicy = EMABSAbilityActivationPolicy::OnInputTriggered;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
+	EMABSDeliveryMode DeliveryMode = EMABSDeliveryMode::Direct;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	EMABSTargetType TargetType = EMABSTargetType::Self;
@@ -47,6 +52,27 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	bool bIgnoreNonTargetWorldHits = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0", EditCondition="DeliveryMode == EMABSDeliveryMode::HitTrace", EditConditionHides))
+	float HitTraceDistance = 1500.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0", EditCondition="DeliveryMode == EMABSDeliveryMode::HitTrace", EditConditionHides))
+	float HitTraceRadius = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0", EditCondition="DeliveryMode == EMABSDeliveryMode::Melee", EditConditionHides))
+	float MeleeRange = 200.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0", EditCondition="DeliveryMode == EMABSDeliveryMode::Melee", EditConditionHides))
+	float MeleeRadius = 75.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(EditCondition="DeliveryMode == EMABSDeliveryMode::Melee", EditConditionHides))
+	float MeleeForwardOffset = 50.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(EditCondition="DeliveryMode == EMABSDeliveryMode::Projectile", EditConditionHides))
+	TSubclassOf<AActor> ProjectileActorClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(EditCondition="DeliveryMode == EMABSDeliveryMode::Projectile", EditConditionHides))
+	FVector ProjectileSpawnOffset = FVector(100.0f, 0.0f, 0.0f);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Debug")
 	bool bDrawTargetTraceDebug = false;

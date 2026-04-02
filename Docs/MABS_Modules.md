@@ -2,75 +2,50 @@
 
 ## What it is
 
-This document explains the current module layout for MABS after Phase 3 cooldown and cost support.
+This document explains the current module layout for MABS after Phase 4 delivery support.
 
 ## Why it exists
 
-Cooldowns and costs are common gameplay rules, but they should not collapse authored data, runtime execution, and debug presentation back into one layer. The module split keeps those responsibilities readable and marketplace-friendly.
+Delivery adds common combat behavior, but it should not collapse authored data, runtime execution, projectile runtime, and debug presentation into one layer. The module split keeps those responsibilities readable and marketplace-friendly.
 
 ## Module map
 
 ### `MABSCore`
 
-What it is:
+Owns:
 
-* the foundational runtime module
-
-Why it exists:
-
-* it keeps shared authored data and runtime types stable
-* it gives higher-level modules one clean dependency for ability definitions, granted specs, and cooldown-group state
-
-How to use it:
-
-* create `UMABSAbilityDefinition` assets
-* read `FMABSAbilitySpec`, `FMABSCooldownGroupState`, `FMABSAbilityDebugEvent`, and `FMABSTargetTraceDebugInfo`
+* `UMABSAbilityDefinition`
+* `EMABSDeliveryMode`
+* ability runtime structs and enums
+* shared debug structs
 
 ### `MABSGameplay`
 
-What it is:
+Owns:
 
-* the primary runtime gameplay module
-
-Why it exists:
-
-* it owns the server-authoritative execution path
-* it keeps grant, activation, cooldowns, costs, target resolution, effect application, and replication together
-
-How to use it:
-
-* add `UMABSAbilityComponent` to an actor or character
-* grant abilities on authority
-* call `TryActivateAbilityByTag`
-* use the cooldown query helpers
-* optionally implement `IMABSInstantEffectReceiver` and `IMABSCostReceiver` on actors that should receive heals or pay cost
+* `UMABSAbilityComponent`
+* authority-side delivery execution
+* direct target resolution
+* hit-trace and melee traces
+* projectile spawn and impact handling
+* instant effects
+* cooldown and cost integration
+* replication
 
 ### `MABSDebug`
 
-What it is:
+Owns:
 
-* the runtime-safe debug tooling module
-
-Why it exists:
-
-* it keeps debug consumers out of the core gameplay execution path
-* it provides formatting helpers and the lightweight runtime overlay
-
-How to use it:
-
-* format debug events, target traces, and granted ability runtime summaries
-* use `AMABSDebugHUD` for a quick inspection layer in PIE
+* runtime-safe debug formatting
+* the HUD overlay
+* display of recent delivery results and the latest trace snapshot
 
 ### `MABSEditor`
 
-What it is:
+Owns:
 
-* the editor-only module
-
-Why it exists:
-
-* runtime and server builds should not depend on editor code
-* future validation and authoring tools need an isolated home
+* editor-only extensions
+* future validation and authoring helpers
 
 ## Dependency direction
 
@@ -78,16 +53,18 @@ Current dependency flow is:
 
 * `MABSCore` depends on no other MABS modules
 * `MABSGameplay` depends on `MABSCore`
-* `MABSDebug` depends on `MABSCore` and consumes `MABSGameplay` runtime data for the overlay
+* `MABSDebug` depends on `MABSCore` and consumes `MABSGameplay` runtime data
 * `MABSEditor` may depend on runtime modules
 
-## Host project versus plugin content
+## Why projectile data still lives cleanly
 
-The plugin remains the reusable runtime product. The host project still contains the local verification harness.
+`ProjectileActorClass` is authored on `UMABSAbilityDefinition` in `MABSCore`, but the actual projectile actor implementation stays in `MABSGameplay`.
 
-Host-project-only example items now include:
+That keeps:
 
-* `Config/DefaultGameplayTags.ini`
-* example content assets
-* minimal health and resource state on `AMABSCharacter`
-* the default `AMABSGameMode` wiring that opts into `AMABSDebugHUD`
+* authored ability data in the core module
+* projectile execution logic in gameplay
+
+## Host project versus plugin
+
+The plugin remains the reusable runtime product. The host project still provides the local harness content, sample actors, and example game mode wiring.

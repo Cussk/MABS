@@ -58,6 +58,9 @@ struct MABSCORE_API FMABSTargetTraceDebugInfo
 	FMABSAbilityHandle AbilityHandle;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
+	EMABSDeliveryMode DeliveryMode = EMABSDeliveryMode::Direct;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
 	EMABSTargetTraceMode TraceMode = EMABSTargetTraceMode::Line;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
@@ -77,6 +80,9 @@ struct MABSCORE_API FMABSTargetTraceDebugInfo
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
 	float WorldTimeSeconds = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
+	FString TraceLabel;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
 	FString ViewPointDescription;

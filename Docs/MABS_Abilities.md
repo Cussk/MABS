@@ -2,130 +2,110 @@
 
 ## What it is
 
-This document explains the current Phase 3 ability model in plain language: what an ability definition is, what granting means, how activation works, and how cooldowns and costs fit into the runtime path.
+This document explains the current Phase 4 ability model: authored definitions, granted runtime specs, activation flow, and how delivery now fits between validation and effect application.
 
 ## Why it exists
 
-MABS is intentionally split into authored data and live runtime state. That split is what makes multiplayer rules, cooldown tracking, targeting, and debugging easier to reason about.
+MABS stays readable by keeping authored data separate from live runtime state. Phase 4 keeps that split intact while adding the first real delivery layer.
 
 ## Ability definitions
 
-`UMABSAbilityDefinition` is the authored asset from `MABSCore`.
+`UMABSAbilityDefinition` is the authored asset in `MABSCore`.
 
-It describes what an ability is supposed to do, not what it is doing right now.
+Phase 4 authored fields now cover four areas:
 
-Typical authored fields in Phase 3:
+* identity and activation: `AbilityTag`, `DisplayName`, `ActivationPolicy`
+* target intent and effect: `TargetType`, `InstantEffectType`, `EffectMagnitude`
+* usage rules: `CooldownSeconds`, `CooldownGroupTag`, `ResourceCost`
+* delivery: `DeliveryMode` plus delivery-specific fields
 
-* `AbilityTag`
-* `DisplayName`
-* `ActivationPolicy`
-* `TargetType`
-* `InstantEffectType`
-* `EffectMagnitude`
-* `TargetTraceDistance`
-* `CooldownSeconds`
-* `CooldownGroupTag`
-* `ResourceCost`
+Current delivery modes are:
 
-Designers edit this asset once and reuse it across actors.
+* `Direct`
+* `HitTrace`
+* `Melee`
+* `Projectile`
 
 ## Granted abilities
 
-Granting means an actor receives a runtime entry for a definition.
+Granting still creates a `FMABSAbilitySpec` on `UMABSAbilityComponent`.
 
-That runtime entry is `FMABSAbilitySpec`. Each granted spec stores:
+Each spec stores:
 
-* the granted definition reference
-* a copied gameplay tag for fast lookup
+* the definition reference
+* a copied gameplay tag
 * a stable handle
 * the current runtime state
 * the last activation result
 * the personal cooldown end time
 
-The runtime component in `MABSGameplay` owns these specs. The data asset does not.
-
 ## Activation flow
 
-Activation in Phase 3 means:
+Activation in Phase 4 means:
 
 1. code or input calls `TryActivateAbilityByTag`
-2. the request reaches the authoritative path
-3. the component validates the grant and authored data
-4. the component checks cooldown and cooldown-group state
-5. the component validates resource affordability if `ResourceCost > 0`
-6. the component accepts the request
-7. the component resolves a target
-8. the component applies an instant effect
-9. the component spends cost on authority
-10. the component starts cooldown on authority
-11. the component emits debug events for each step
-12. the ability returns to idle
+2. the request reaches authority
+3. the component validates grant, cooldown, and cost rules
+4. the component emits `DeliveryStarted`
+5. the component executes the authored delivery mode
+6. `Direct`, `HitTrace`, and `Melee` apply the instant effect immediately on success
+7. `Projectile` commits on successful spawn
+8. authority spends cost and starts cooldown on successful commit
+9. projectile impact later applies the authored instant effect on authority
+10. the component emits readable debug events for the full path
+
+## Direct versus delivery
+
+Target intent and delivery are now separate concepts.
+
+Examples:
+
+* a self-heal uses `TargetType = Self` and `DeliveryMode = Direct`
+* a rifle shot uses `TargetType = Actor` and `DeliveryMode = HitTrace`
+* a sword slash uses `TargetType = Actor` and `DeliveryMode = Melee`
+* a fireball uses `TargetType = Actor` and `DeliveryMode = Projectile`
+
+`Direct` keeps the older target-resolution path. The other delivery modes resolve the final actor through delivery execution.
 
 ## Runtime state versus authored data
 
 Authored data answers:
 
-* what tag this ability uses
-* how designers should label it
-* what target style it expects
-* what instant effect type it applies
-* how strong that effect is
-* how long its cooldown should be
-* whether it belongs to a shared cooldown group
-* how much resource it costs
+* what the ability should do
+* which delivery mode it uses
+* how its effect, cost, and cooldown are configured
 
 Runtime state answers:
 
-* was this ability granted on this actor
-* is it idle, active, or blocked right now
-* what happened the last time activation was attempted
+* whether the ability is granted
+* whether it is idle, active, or blocked
+* what happened on the last activation request
 * when its personal cooldown ends
-* which shared cooldown groups are active on the owning component
+* which cooldown groups are active on the owner
 
-Keeping those separate is what makes the system multiplayer-safe and extensible.
+Projectile flight itself is transient runtime state on the spawned projectile actor, not on the data asset.
 
 ## How to use it
 
-1. Create a `UMABSAbilityDefinition` asset.
-2. Set `TargetType` to `Self` or `Actor`.
-3. Set `InstantEffectType` to `Damage` or `Heal`.
-4. Set `EffectMagnitude` to a positive value.
-5. Set `CooldownSeconds` when the ability should lock out after success.
-6. Optionally set `CooldownGroupTag` when multiple abilities should share a lockout.
-7. Set `ResourceCost` when the owner should pay a cost.
-8. Grant it on the authoritative owner with `GrantAbility`.
-9. Activate it with `TryActivateAbilityByTag`.
-10. Read `FMABSAbilitySpec`, cooldown query helpers, or debug events to inspect the result.
-
-## Example
-
-Example self-heal setup:
-
-1. Create `DA_Test_SelfHeal`.
-2. Set `AbilityTag` to `Test.Ability.SelfHeal`.
-3. Set `DisplayName` to `Self Heal`.
-4. Set `TargetType` to `Self`.
-5. Set `InstantEffectType` to `Heal`.
-6. Set `EffectMagnitude` to `25`.
-7. Set `CooldownSeconds` to `5`.
-8. Set `CooldownGroupTag` to `Test.CooldownGroup.Support`.
-9. Set `ResourceCost` to `20`.
-10. Grant it to the player character on the server.
-11. Press an input key that calls `TryActivateAbilityByTag(Test.Ability.SelfHeal)`.
-12. Observe `CostValidated`, `EffectApplied`, `CostSpent`, `CooldownStarted`, and `CommitSucceeded`.
+1. Create a `UMABSAbilityDefinition`.
+2. Set `TargetType` and `DeliveryMode`.
+3. Set `InstantEffectType` and `EffectMagnitude`.
+4. Configure cooldown and cost if needed.
+5. Fill in the delivery-specific fields for hit trace, melee, or projectile.
+6. Grant the ability on authority.
+7. Activate it with `TryActivateAbilityByTag`.
+8. Inspect `FMABSAbilitySpec`, recent debug events, and the overlay.
 
 ## Not included in this phase
 
-Phase 3 still does not include:
+Phase 4 still does not include:
 
-* gameplay effect durations
-* a full stat or attribute system
-* resource regeneration
-* cooldown reduction stats
-* charge systems
-* AoE targeting
-* location targeting
-* team filtering
+* AoE zones
+* location abilities
 * prediction
-* projectile handling
+* projectile homing
+* chain or bounce projectiles
+* multi-hit melee systems
+* duration-based effects
+* status effects
 * animation systems

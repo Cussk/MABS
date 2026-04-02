@@ -2,110 +2,34 @@
 
 ## What it is
 
-This document explains the Phase 3 cost model for MABS.
+This document explains the current cost model in MABS after Phase 4 delivery support.
 
 ## Why it exists
 
-Many abilities need a simple payment rule before they can activate. Phase 3 adds the smallest useful authoritative cost model without forcing MABS to own a full stat or attribute framework.
+Delivery mode changes how an ability reaches a target, not who owns resource spending. Cost validation and spending still stay authoritative.
 
 ## Cost design
 
-Costs are authored in MABS, but the actual resource storage stays in the host project.
-
-That means:
+Costs are still authored in MABS and stored in the host project:
 
 * `UMABSAbilityDefinition` defines `ResourceCost`
 * the owning actor optionally implements `IMABSCostReceiver`
 * `UMABSAbilityComponent` validates and spends cost on authority
 
-This keeps MABS flexible across:
+## Commit timing
 
-* mana
-* stamina
-* energy
-* ammo-like resource pools
-* custom project-specific resource models
+`Direct`, `HitTrace`, and `Melee`:
 
-## Authored cost data
+* cost is spent after successful effect application
 
-Relevant authored field on `UMABSAbilityDefinition`:
+`Projectile`:
 
-* `ResourceCost`
-
-If `ResourceCost <= 0`, MABS skips cost validation and cost spending.
-
-## Resource interface
-
-Phase 3 adds `IMABSCostReceiver`.
-
-Current functions:
-
-* `CanAffordMABSCost(float Cost, UMABSAbilityDefinition* SourceAbility)`
-* `SpendMABSCost(float Cost, UMABSAbilityDefinition* SourceAbility)`
-
-This interface is intentionally small.
-
-## Cost behavior
-
-### On activation attempt
-
-Before target/effect execution, MABS:
-
-* checks whether `ResourceCost > 0`
-* validates that the owner implements `IMABSCostReceiver`
-* calls `CanAffordMABSCost(...)`
-
-If the owner cannot afford cost:
-
-* activation fails cleanly
-* `LastActivationResult` becomes `InsufficientResources`
-* `CostRejected` explains why
-
-### On successful commit
-
-After the effect succeeds, MABS spends cost on authority through `SpendMABSCost(...)`.
-
-When spending succeeds:
-
-* `CostSpent` is emitted
-
-## Host-project example
-
-The current host project `AMABSCharacter` implements `IMABSCostReceiver` with a small example resource pool:
-
-* `MaxExampleResource`
-* `CurrentExampleResource`
-
-This is host-project sample code, not plugin-mandated gameplay design.
+* cost is spent after successful projectile spawn
 
 ## How to use it
 
-1. Open a `UMABSAbilityDefinition`.
-2. Set `ResourceCost` to a positive number.
-3. Implement `IMABSCostReceiver` on the owning actor.
-4. Grant the ability on authority.
-5. Activate it with enough resource.
-6. Reduce the owner resource below the authored cost.
-7. Activate it again and inspect `CostRejected`.
-
-## Example
-
-Example self-heal cost setup:
-
-1. Create `DA_Test_SelfHeal`.
-2. Set `ResourceCost` to `20`.
-3. Grant it to `AMABSCharacter`.
-4. Verify the first activation emits `CostValidated` and `CostSpent`.
-5. Repeatedly use abilities until the example resource pool drops below `20`.
-6. Verify the next activation emits `CostRejected`.
-
-## Not included in this phase
-
-Phase 3 costs do not yet include:
-
-* a built-in stat framework
-* regeneration systems
-* complex cost formulas
-* cooldown reduction or discount stats
-* refund systems
-* multi-resource payments
+1. Set `ResourceCost`.
+2. Implement `IMABSCostReceiver` on the owner.
+3. Grant the ability on authority.
+4. Activate it with enough resource.
+5. Verify `CostValidated` and `CostSpent`.

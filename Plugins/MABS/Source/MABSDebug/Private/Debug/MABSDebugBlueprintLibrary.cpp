@@ -29,16 +29,22 @@ FString UMABSDebugBlueprintLibrary::FormatTargetTraceDebugInfo(const FMABSTarget
 {
 	if (!DebugInfo.bHasTraceData)
 	{
-		return TEXT("No recent actor-target trace.");
+		return TEXT("No recent target or delivery trace.");
 	}
 
+	const UEnum* DeliveryModeEnum = StaticEnum<EMABSDeliveryMode>();
 	const UEnum* TraceModeEnum = StaticEnum<EMABSTargetTraceMode>();
+	const FString DeliveryModeName = DeliveryModeEnum != nullptr
+		? DeliveryModeEnum->GetNameStringByValue(static_cast<int64>(DebugInfo.DeliveryMode))
+		: TEXT("Unknown");
 	const FString TraceModeName = TraceModeEnum != nullptr
 		? TraceModeEnum->GetNameStringByValue(static_cast<int64>(DebugInfo.TraceMode))
 		: TEXT("Unknown");
+	const FString TraceLabel = DebugInfo.TraceLabel.IsEmpty() ? TEXT("Trace") : DebugInfo.TraceLabel;
 
 	return FString::Printf(
-		TEXT("[%s Trace] AbilityTag=%s Hit=%s Accepted=%s Actor=%s Component=%s Distance=%.0f Message=%s"),
+		TEXT("[%s %s] AbilityTag=%s Hit=%s Accepted=%s Actor=%s Component=%s Distance=%.0f Label=%s Message=%s"),
+		*DeliveryModeName,
 		*TraceModeName,
 		*DebugInfo.AbilityTag.ToString(),
 		DebugInfo.bHit ? TEXT("true") : TEXT("false"),
@@ -46,6 +52,7 @@ FString UMABSDebugBlueprintLibrary::FormatTargetTraceDebugInfo(const FMABSTarget
 		*DebugInfo.HitActorName,
 		*DebugInfo.HitComponentName,
 		DebugInfo.HitDistance,
+		*TraceLabel,
 		*DebugInfo.ResultMessage);
 }
 
@@ -70,12 +77,23 @@ FString UMABSDebugBlueprintLibrary::FormatAbilitySpecRuntimeSummary(const FMABSA
 		CooldownGroupText = TEXT(" Group=") + AbilitySpec.AbilityDefinition->CooldownGroupTag.ToString();
 	}
 
+	FString DeliveryModeText;
+	if (AbilitySpec.AbilityDefinition != nullptr)
+	{
+		if (const UEnum* DeliveryModeEnum = StaticEnum<EMABSDeliveryMode>())
+		{
+			DeliveryModeText = TEXT(" Delivery=")
+				+ DeliveryModeEnum->GetNameStringByValue(static_cast<int64>(AbilitySpec.AbilityDefinition->DeliveryMode));
+		}
+	}
+
 	return FString::Printf(
-		TEXT("[Ability] Tag=%s State=%s Result=%s Cooldown=%s%s"),
+		TEXT("[Ability] Tag=%s State=%s Result=%s Cooldown=%s%s%s"),
 		*AbilitySpec.AbilityTag.ToString(),
 		*RuntimeStateName,
 		*ResultName,
 		*CooldownText,
+		*DeliveryModeText,
 		*CooldownGroupText);
 }
 

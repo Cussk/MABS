@@ -2,72 +2,62 @@
 
 ## What MABS is
 
-MABS stands for **Multiplayer Ability System**.
+MABS is a plugin-first, multiplayer-ready, data-driven ability framework for Unreal Engine.
 
-As of Phase 3, MABS is a plugin-first, multiplayer-ready, data-driven ability framework for Unreal Engine. It keeps authored data, runtime state, gameplay execution, debug tooling, and editor-only code in separate modules while supporting a small but inspectable end-to-end gameplay result:
+As of Phase 4, the runtime path supports:
 
-* activate an ability
-* validate cooldown and cost on authority
-* resolve a target
-* apply an instant effect
-* spend cost and start cooldown on authority
-* inspect the result through structured events and the runtime overlay
-
-Current runtime ownership is:
-
-* `MABSCore` for authored data and foundational runtime types
-* `MABSGameplay` for granting, activation, cooldowns, costs, target resolution, instant effects, and replication
-* `MABSDebug` for runtime-safe debug helpers and the HUD overlay
-* `MABSEditor` for editor-only extensions
+* granting authored abilities
+* server-authoritative activation
+* cooldown and cost validation
+* direct target resolution
+* delivery through `Direct`, `HitTrace`, `Melee`, or `Projectile`
+* instant `Damage` and `Heal` effects
+* structured debug events and the runtime overlay
 
 ## Why it exists
 
-Most teams need the same ability building blocks:
+Most teams need the same baseline gameplay pieces:
 
-* reusable data assets for designers
-* a runtime owner component for characters and actors
-* server-authoritative multiplayer behavior
-* enough telemetry to understand request flow, denial reasons, and failures
-* a clean module layout that can grow without mixing editor and runtime code
+* designer-authored data assets
+* runtime ability state kept separate from authored data
+* authoritative multiplayer behavior
+* reusable delivery modes for common combat actions
+* enough runtime visibility to explain success and failure
 
-MABS provides that foundation in a form that is easy to inspect, extend, and ship.
+MABS provides that foundation without pulling in a larger framework.
 
-## What Phase 3 delivers
+## Current module ownership
 
-Phase 3 builds on the targeting/debug work from Phase 2.5 and adds the first real usage restrictions.
+* `MABSCore` owns authored data and shared runtime types
+* `MABSGameplay` owns granting, activation, delivery, effects, costs, cooldowns, replication, and projectile runtime
+* `MABSDebug` owns runtime-safe formatting helpers and the HUD overlay
+* `MABSEditor` remains the editor-only extension point
 
-The current runtime behavior includes:
+## Current ability flow
 
-* granted ability storage on `UMABSAbilityComponent`
-* replicated `FMABSAbilitySpec` runtime state
-* replicated shared cooldown-group state
-* `TryActivateAbilityByTag` with a client-to-server RPC path
-* authority-side cooldown and cost validation
-* target resolution for `Self` and `Actor`
-* instant effects for `Damage` and `Heal`
-* authoritative cost spending through `IMABSCostReceiver`
-* authoritative cooldown start after successful commit
-* structured debug events for request, cost, cooldown, target, effect, and commit steps
+1. A server-owned actor is granted a `UMABSAbilityDefinition`.
+2. Input or gameplay code calls `TryActivateAbilityByTag`.
+3. Authority validates grant, cooldown, and cost rules.
+4. Authority executes the authored delivery mode.
+5. `Direct`, `HitTrace`, and `Melee` apply the instant effect immediately on success.
+6. `Projectile` commits on authoritative spawn, then applies the effect later on authoritative impact.
+7. Authority emits debug events for request, delivery, effect, cost, cooldown, and commit steps.
 
-## Content ownership in the current project
+## Host-project content
 
-The plugin is the reusable runtime product.
+The plugin is the reusable product. The current host project still supplies the local verification harness:
 
-The current host project still contains development harness content such as:
-
-* `Config/DefaultGameplayTags.ini`
-* `Content/Data/DA_Test_Fireball.uasset`
-* Third Person Blueprint setup used to verify the flow
-* minimal example health and resource state on `AMABSCharacter`
-* the default `AMABSGameMode` wiring for the debug HUD overlay
+* gameplay tags in `Config/DefaultGameplayTags.ini`
+* example content assets
+* `AMABSCharacter` sample health and resource state
+* `AMABSGameMode` wiring for the debug HUD overlay
 
 ## How to use it
 
 1. Enable the local `MABS` plugin.
-2. Create a `UMABSAbilityDefinition` asset.
-3. Set its targeting, effect, cooldown, and cost fields.
+2. Create a `UMABSAbilityDefinition`.
+3. Set target intent, effect data, cooldown, cost, and `DeliveryMode`.
 4. Add `UMABSAbilityComponent` to the owning actor.
-5. Implement `IMABSCostReceiver` if the ability spends cost.
-6. Grant the definition on the server.
-7. Call `TryActivateAbilityByTag`.
-8. Inspect the debug events, cooldown query helpers, and the debug HUD.
+5. Grant the ability on authority.
+6. Call `TryActivateAbilityByTag`.
+7. Verify the result through recent debug events and the overlay.

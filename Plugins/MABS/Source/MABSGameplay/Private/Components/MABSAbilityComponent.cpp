@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Components/MABSAbilityComponent.h"
+#include "Actors/MABSProjectileBase.h"
 #include "Components/PrimitiveComponent.h"
 #include "Data/MABSAbilityDefinition.h"
 #include "Debug/MABSAbilitySystemLogs.h"
@@ -24,11 +25,21 @@ namespace MABSAbilityComponentEventNames
 	static const FName CommitSucceeded(TEXT("CommitSucceeded"));
 	static const FName CooldownRejected(TEXT("CooldownRejected"));
 	static const FName CooldownStarted(TEXT("CooldownStarted"));
+	static const FName DeliveryFailed(TEXT("DeliveryFailed"));
+	static const FName DeliveryStarted(TEXT("DeliveryStarted"));
 	static const FName EffectApplied(TEXT("EffectApplied"));
 	static const FName EffectApplicationFailed(TEXT("EffectApplicationFailed"));
 	static const FName CostRejected(TEXT("CostRejected"));
 	static const FName CostSpent(TEXT("CostSpent"));
 	static const FName CostValidated(TEXT("CostValidated"));
+	static const FName HitTraceHit(TEXT("HitTraceHit"));
+	static const FName HitTraceRejected(TEXT("HitTraceRejected"));
+	static const FName MeleeHit(TEXT("MeleeHit"));
+	static const FName MeleeRejected(TEXT("MeleeRejected"));
+	static const FName ProjectileImpact(TEXT("ProjectileImpact"));
+	static const FName ProjectileImpactRejected(TEXT("ProjectileImpactRejected"));
+	static const FName ProjectileSpawned(TEXT("ProjectileSpawned"));
+	static const FName ProjectileSpawnFailed(TEXT("ProjectileSpawnFailed"));
 	static const FName RequestAccepted(TEXT("RequestAccepted"));
 	static const FName RequestRejected(TEXT("RequestRejected"));
 	static const FName RequestSentToServer(TEXT("RequestSentToServer"));
@@ -67,6 +78,9 @@ namespace
 		case EMABSAbilityActivationResult::AuthorityRejected:
 			return TEXT("Activation rejected because the request must be handled by authority.");
 
+		case EMABSAbilityActivationResult::DeliveryFailed:
+			return TEXT("Activation rejected because the authored delivery step failed.");
+
 		case EMABSAbilityActivationResult::TargetResolutionFailed:
 			return TEXT("Activation rejected because no valid target could be resolved.");
 
@@ -93,6 +107,24 @@ namespace
 
 		default:
 			return TEXT("None");
+		}
+	}
+
+	FString GetDeliveryModeLabel(const EMABSDeliveryMode DeliveryMode)
+	{
+		switch (DeliveryMode)
+		{
+		case EMABSDeliveryMode::HitTrace:
+			return TEXT("HitTrace");
+
+		case EMABSDeliveryMode::Melee:
+			return TEXT("Melee");
+
+		case EMABSDeliveryMode::Projectile:
+			return TEXT("Projectile");
+
+		default:
+			return TEXT("Direct");
 		}
 	}
 
@@ -155,12 +187,20 @@ namespace
 		case EMABSAbilityActivationResult::InsufficientResources:
 			return MABSAbilityComponentEventNames::CostRejected;
 
+		case EMABSAbilityActivationResult::DeliveryFailed:
+			return MABSAbilityComponentEventNames::DeliveryFailed;
+
 		default:
 			return MABSAbilityComponentEventNames::RequestRejected;
 		}
 	}
 
-	FCollisionObjectQueryParams MakeTargetTraceObjectQueryParams(const UMABSAbilityDefinition& AbilityDefinition)
+	EMABSTargetTraceMode GetTraceModeForRadius(const float TraceRadius)
+	{
+		return TraceRadius > 0.0f ? EMABSTargetTraceMode::Sphere : EMABSTargetTraceMode::Line;
+	}
+
+	FCollisionObjectQueryParams MakeTargetTraceObjectQueryParams(const bool bIgnoreNonTargetWorldHits)
 	{
 		FCollisionObjectQueryParams ObjectQueryParams;
 		ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
@@ -169,7 +209,7 @@ namespace
 		ObjectQueryParams.AddObjectTypesToQuery(ECC_Vehicle);
 		ObjectQueryParams.AddObjectTypesToQuery(ECC_Destructible);
 
-		if (!AbilityDefinition.bIgnoreNonTargetWorldHits)
+		if (!bIgnoreNonTargetWorldHits)
 		{
 			ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 		}
@@ -537,44 +577,108 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(con
 
 EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const
 {
-	if (AbilitySpec.AbilityDefinition == nullptr || !AbilitySpec.AbilityTag.IsValid())
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr || !AbilitySpec.AbilityTag.IsValid())
 	{
 		OutDebugMessage = TEXT("Activation rejected because the ability spec is missing a valid definition or tag.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
-	if (AbilitySpec.AbilityDefinition->AbilityTag != AbilitySpec.AbilityTag)
+	if (AbilityDefinition->AbilityTag != AbilitySpec.AbilityTag)
 	{
 		OutDebugMessage = TEXT("Activation rejected because the granted ability tag no longer matches the authored definition.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
-	if (AbilitySpec.AbilityDefinition->TargetType != EMABSTargetType::Self
-		&& AbilitySpec.AbilityDefinition->TargetType != EMABSTargetType::Actor)
-	{
-		OutDebugMessage = TEXT("Activation rejected because the authored target type is not supported.");
-		return EMABSAbilityActivationResult::InvalidAbility;
-	}
-
-	if (AbilitySpec.AbilityDefinition->InstantEffectType == EMABSInstantEffectType::None
-		|| AbilitySpec.AbilityDefinition->EffectMagnitude <= 0.0f)
+	if (AbilityDefinition->InstantEffectType == EMABSInstantEffectType::None
+		|| AbilityDefinition->EffectMagnitude <= 0.0f)
 	{
 		OutDebugMessage = TEXT("Activation rejected because the authored instant effect is invalid.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
-	if (AbilitySpec.AbilityDefinition->TargetType == EMABSTargetType::Actor
-		&& AbilitySpec.AbilityDefinition->TargetTraceDistance <= 0.0f)
+	switch (AbilityDefinition->DeliveryMode)
 	{
-		OutDebugMessage = TEXT("Activation rejected because actor targeting requires a positive trace distance.");
-		return EMABSAbilityActivationResult::InvalidAbility;
-	}
+	case EMABSDeliveryMode::Direct:
+		if (AbilityDefinition->TargetType != EMABSTargetType::Self
+			&& AbilityDefinition->TargetType != EMABSTargetType::Actor)
+		{
+			OutDebugMessage = TEXT("Activation rejected because direct delivery only supports Self or Actor target intent.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
 
-	if (AbilitySpec.AbilityDefinition->TargetType == EMABSTargetType::Actor
-		&& AbilitySpec.AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
-		&& AbilitySpec.AbilityDefinition->TargetTraceRadius <= 0.0f)
-	{
-		OutDebugMessage = TEXT("Activation rejected because sphere traces require a positive trace radius.");
+		if (AbilityDefinition->TargetType == EMABSTargetType::Actor
+			&& AbilityDefinition->TargetTraceDistance <= 0.0f)
+		{
+			OutDebugMessage = TEXT("Activation rejected because direct actor targeting requires a positive trace distance.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+
+		if (AbilityDefinition->TargetType == EMABSTargetType::Actor
+			&& AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
+			&& AbilityDefinition->TargetTraceRadius <= 0.0f)
+		{
+			OutDebugMessage = TEXT("Activation rejected because direct sphere targeting requires a positive trace radius.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+		break;
+
+	case EMABSDeliveryMode::HitTrace:
+		if (AbilityDefinition->TargetType != EMABSTargetType::Actor)
+		{
+			OutDebugMessage = TEXT("Activation rejected because HitTrace delivery requires Actor target intent.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+
+		if (AbilityDefinition->HitTraceDistance <= 0.0f)
+		{
+			OutDebugMessage = TEXT("Activation rejected because HitTrace delivery requires a positive trace distance.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+		break;
+
+	case EMABSDeliveryMode::Melee:
+		if (AbilityDefinition->TargetType != EMABSTargetType::Actor)
+		{
+			OutDebugMessage = TEXT("Activation rejected because Melee delivery requires Actor target intent.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+
+		if (AbilityDefinition->MeleeRange <= 0.0f)
+		{
+			OutDebugMessage = TEXT("Activation rejected because Melee delivery requires a positive range.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+
+		if (AbilityDefinition->MeleeRadius <= 0.0f)
+		{
+			OutDebugMessage = TEXT("Activation rejected because Melee delivery requires a positive radius.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+		break;
+
+	case EMABSDeliveryMode::Projectile:
+		if (AbilityDefinition->TargetType != EMABSTargetType::Actor)
+		{
+			OutDebugMessage = TEXT("Activation rejected because Projectile delivery requires Actor target intent.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+
+		if (AbilityDefinition->ProjectileActorClass == nullptr)
+		{
+			OutDebugMessage = TEXT("Activation rejected because Projectile delivery requires a projectile actor class.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+
+		if (!AbilityDefinition->ProjectileActorClass->IsChildOf(AMABSProjectileBase::StaticClass()))
+		{
+			OutDebugMessage = TEXT("Activation rejected because Projectile delivery requires a class derived from AMABSProjectileBase.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+		break;
+
+	default:
+		OutDebugMessage = TEXT("Activation rejected because the authored delivery mode is not supported.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
@@ -620,21 +724,21 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 			OutDebugMessage = FString::Printf(
 				TEXT("Activation rejected because owner '%s' does not implement IMABSCostReceiver for resource cost %.2f."),
 				*GetNameSafe(Owner),
-				AbilitySpec.AbilityDefinition->ResourceCost);
+				AbilityDefinition->ResourceCost);
 			return EMABSAbilityActivationResult::InsufficientResources;
 		}
 
 		const bool bCanAffordCost = IMABSCostReceiver::Execute_CanAffordMABSCost(
 			Owner,
-			AbilitySpec.AbilityDefinition->ResourceCost,
-			AbilitySpec.AbilityDefinition);
+			AbilityDefinition->ResourceCost,
+			const_cast<UMABSAbilityDefinition*>(AbilityDefinition));
 		if (!bCanAffordCost)
 		{
 			OutDebugMessage = FString::Printf(
 				TEXT("Activation rejected because owner '%s' cannot afford resource cost %.2f for ability '%s'."),
 				*GetNameSafe(Owner),
-				AbilitySpec.AbilityDefinition->ResourceCost,
-				*GetAbilityLabel(AbilitySpec.AbilityDefinition));
+				AbilityDefinition->ResourceCost,
+				*GetAbilityLabel(AbilityDefinition));
 			return EMABSAbilityActivationResult::InsufficientResources;
 		}
 	}
@@ -646,40 +750,389 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 {
 	ClearLatestTargetTraceDebugInfo(bNotifyOwningClient);
 
-	FString TargetDebugMessage;
-	AActor* const TargetActor = ResolveAbilityTarget(AbilitySpec, TargetDebugMessage, bNotifyOwningClient);
-	if (TargetActor == nullptr)
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr)
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::TargetResolutionFailed;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::InvalidAbility;
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::TargetResolutionFailed,
+			MABSAbilityComponentEventNames::RequestRejected,
 			AbilitySpec.AbilityTag,
 			AbilitySpec.Handle,
 			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::TargetResolutionFailed,
-			TargetDebugMessage);
+			EMABSAbilityActivationResult::InvalidAbility,
+			TEXT("CommitAbility failed because the granted ability definition was invalid."));
 		if (bNotifyOwningClient)
 		{
 			EmitDebugEventToOwningClient(DebugEvent);
 		}
 
-		return EMABSAbilityActivationResult::TargetResolutionFailed;
+		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
-	const FMABSAbilityDebugEvent TargetResolvedEvent = EmitDebugEvent(
-		MABSAbilityComponentEventNames::TargetResolved,
+	const EMABSDeliveryMode DeliveryMode = AbilityDefinition->DeliveryMode;
+	const FMABSAbilityDebugEvent DeliveryStartedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::DeliveryStarted,
 		AbilitySpec.AbilityTag,
 		AbilitySpec.Handle,
 		AbilitySpec.RuntimeState,
 		EMABSAbilityActivationResult::Success,
-		TargetDebugMessage);
+		FString::Printf(
+			TEXT("Started %s delivery for ability '%s'."),
+			*GetDeliveryModeLabel(DeliveryMode),
+			*GetAbilityLabel(AbilityDefinition)));
 	if (bNotifyOwningClient)
 	{
-		EmitDebugEventToOwningClient(TargetResolvedEvent);
+		EmitDebugEventToOwningClient(DeliveryStartedEvent);
 	}
 
+	switch (DeliveryMode)
+	{
+	case EMABSDeliveryMode::Direct:
+		{
+			FString DeliveryDebugMessage;
+			AActor* const TargetActor = ExecuteDirectDelivery(AbilitySpec, DeliveryDebugMessage, bNotifyOwningClient);
+			if (TargetActor == nullptr)
+			{
+				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::TargetResolutionFailed;
+
+				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+					MABSAbilityComponentEventNames::TargetResolutionFailed,
+					AbilitySpec.AbilityTag,
+					AbilitySpec.Handle,
+					AbilitySpec.RuntimeState,
+					EMABSAbilityActivationResult::TargetResolutionFailed,
+					DeliveryDebugMessage);
+				if (bNotifyOwningClient)
+				{
+					EmitDebugEventToOwningClient(DebugEvent);
+				}
+
+				return EMABSAbilityActivationResult::TargetResolutionFailed;
+			}
+
+			const FMABSAbilityDebugEvent TargetResolvedEvent = EmitDebugEvent(
+				MABSAbilityComponentEventNames::TargetResolved,
+				AbilitySpec.AbilityTag,
+				AbilitySpec.Handle,
+				AbilitySpec.RuntimeState,
+				EMABSAbilityActivationResult::Success,
+				DeliveryDebugMessage);
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(TargetResolvedEvent);
+			}
+
+			return CompleteResolvedTargetAbility(AbilitySpec, TargetActor, DeliveryMode, bNotifyOwningClient);
+		}
+
+	case EMABSDeliveryMode::HitTrace:
+		{
+			FString DeliveryDebugMessage;
+			AActor* const TargetActor = ExecuteHitTraceDelivery(AbilitySpec, DeliveryDebugMessage, bNotifyOwningClient);
+			if (TargetActor == nullptr)
+			{
+				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+
+				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+					MABSAbilityComponentEventNames::DeliveryFailed,
+					AbilitySpec.AbilityTag,
+					AbilitySpec.Handle,
+					AbilitySpec.RuntimeState,
+					EMABSAbilityActivationResult::DeliveryFailed,
+					DeliveryDebugMessage);
+				if (bNotifyOwningClient)
+				{
+					EmitDebugEventToOwningClient(DebugEvent);
+				}
+
+				return EMABSAbilityActivationResult::DeliveryFailed;
+			}
+
+			return CompleteResolvedTargetAbility(AbilitySpec, TargetActor, DeliveryMode, bNotifyOwningClient);
+		}
+
+	case EMABSDeliveryMode::Melee:
+		{
+			FString DeliveryDebugMessage;
+			AActor* const TargetActor = ExecuteMeleeDelivery(AbilitySpec, DeliveryDebugMessage, bNotifyOwningClient);
+			if (TargetActor == nullptr)
+			{
+				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+
+				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+					MABSAbilityComponentEventNames::DeliveryFailed,
+					AbilitySpec.AbilityTag,
+					AbilitySpec.Handle,
+					AbilitySpec.RuntimeState,
+					EMABSAbilityActivationResult::DeliveryFailed,
+					DeliveryDebugMessage);
+				if (bNotifyOwningClient)
+				{
+					EmitDebugEventToOwningClient(DebugEvent);
+				}
+
+				return EMABSAbilityActivationResult::DeliveryFailed;
+			}
+
+			return CompleteResolvedTargetAbility(AbilitySpec, TargetActor, DeliveryMode, bNotifyOwningClient);
+		}
+
+	case EMABSDeliveryMode::Projectile:
+		return ExecuteProjectileDelivery(AbilitySpec, bNotifyOwningClient);
+
+	default:
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::InvalidAbility;
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::DeliveryFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::InvalidAbility,
+			TEXT("CommitAbility failed because the authored delivery mode is not supported."));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+}
+
+AActor* UMABSAbilityComponent::ExecuteDirectDelivery(
+	const FMABSAbilitySpec& AbilitySpec,
+	FString& OutDebugMessage,
+	const bool bNotifyOwningClient)
+{
+	return ResolveAbilityTarget(AbilitySpec, OutDebugMessage, bNotifyOwningClient);
+}
+
+AActor* UMABSAbilityComponent::ExecuteHitTraceDelivery(
+	const FMABSAbilitySpec& AbilitySpec,
+	FString& OutDebugMessage,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	AActor* const Owner = GetOwner();
+	if (AbilityDefinition == nullptr || Owner == nullptr)
+	{
+		OutDebugMessage = TEXT("HitTrace delivery failed because the ability definition or owning actor was invalid.");
+		return nullptr;
+	}
+
+	FVector TraceStart = FVector::ZeroVector;
+	FRotator TraceRotation = FRotator::ZeroRotator;
+	FString ViewPointDescription;
+	if (!GetTargetTraceViewPoint(TraceStart, TraceRotation, ViewPointDescription))
+	{
+		OutDebugMessage = TEXT("HitTrace delivery failed because the trace viewpoint was unavailable.");
+		return nullptr;
+	}
+
+	FVector GameplayTraceStart = TraceStart;
+	FRotator UnusedTraceRotation = TraceRotation;
+	Owner->GetActorEyesViewPoint(GameplayTraceStart, UnusedTraceRotation);
+	const FVector TraceEnd = GameplayTraceStart + (TraceRotation.Vector() * AbilityDefinition->HitTraceDistance);
+	return ResolveActorTargetFromTrace(
+		AbilitySpec,
+		GameplayTraceStart,
+		TraceEnd,
+		EMABSDeliveryMode::HitTrace,
+		GetTraceModeForRadius(AbilityDefinition->HitTraceRadius),
+		AbilityDefinition->HitTraceRadius,
+		false,
+		TEXT("HitTrace delivery"),
+		FString::Printf(TEXT("%sAim + OwnerEyesStart"), *ViewPointDescription),
+		NAME_None,
+		MABSAbilityComponentEventNames::HitTraceHit,
+		MABSAbilityComponentEventNames::HitTraceRejected,
+		OutDebugMessage,
+		bNotifyOwningClient);
+}
+
+AActor* UMABSAbilityComponent::ExecuteMeleeDelivery(
+	const FMABSAbilitySpec& AbilitySpec,
+	FString& OutDebugMessage,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	AActor* const Owner = GetOwner();
+	if (AbilityDefinition == nullptr || Owner == nullptr)
+	{
+		OutDebugMessage = TEXT("Melee delivery failed because the ability definition or owning actor was invalid.");
+		return nullptr;
+	}
+
+	const FVector ForwardVector = Owner->GetActorForwardVector();
+	const FVector TraceStart = Owner->GetActorLocation() + (ForwardVector * AbilityDefinition->MeleeForwardOffset);
+	const FVector TraceEnd = TraceStart + (ForwardVector * AbilityDefinition->MeleeRange);
+	return ResolveActorTargetFromTrace(
+		AbilitySpec,
+		TraceStart,
+		TraceEnd,
+		EMABSDeliveryMode::Melee,
+		EMABSTargetTraceMode::Sphere,
+		AbilityDefinition->MeleeRadius,
+		false,
+		TEXT("Melee delivery"),
+		TEXT("OwnerForwardFromActorLocation"),
+		NAME_None,
+		MABSAbilityComponentEventNames::MeleeHit,
+		MABSAbilityComponentEventNames::MeleeRejected,
+		OutDebugMessage,
+		bNotifyOwningClient);
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
+	FMABSAbilitySpec& AbilitySpec,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	UWorld* const World = GetWorld();
+	if (AbilityDefinition == nullptr || World == nullptr)
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			TEXT("Projectile delivery failed because the world or ability definition was unavailable."));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		const FMABSAbilityDebugEvent DeliveryFailedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::DeliveryFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			TEXT("Projectile delivery failed before the projectile could spawn."));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DeliveryFailedEvent);
+		}
+
+		return EMABSAbilityActivationResult::DeliveryFailed;
+	}
+
+	FTransform SpawnTransform = FTransform::Identity;
+	FString SpawnTransformMessage;
+	if (!GetProjectileSpawnTransform(*AbilityDefinition, SpawnTransform, SpawnTransformMessage))
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			SpawnTransformMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		const FMABSAbilityDebugEvent DeliveryFailedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::DeliveryFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			SpawnTransformMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DeliveryFailedEvent);
+		}
+
+		return EMABSAbilityActivationResult::DeliveryFailed;
+	}
+
+	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
+
+	AMABSProjectileBase* Projectile = World->SpawnActorDeferred<AMABSProjectileBase>(
+		AbilityDefinition->ProjectileActorClass,
+		SpawnTransform,
+		GetOwner(),
+		GetOwner() != nullptr ? GetOwner()->GetInstigator() : nullptr,
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding);
+	if (Projectile == nullptr)
+	{
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
+
+		const FString SpawnFailedMessage = FString::Printf(
+			TEXT("Projectile delivery failed because class '%s' could not be spawned. %s"),
+			*GetNameSafe(AbilityDefinition->ProjectileActorClass),
+			*SpawnTransformMessage);
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			SpawnFailedMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		const FMABSAbilityDebugEvent DeliveryFailedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::DeliveryFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			SpawnFailedMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DeliveryFailedEvent);
+		}
+
+		return EMABSAbilityActivationResult::DeliveryFailed;
+	}
+
+	Projectile->InitializeProjectile(this, GetOwner(), AbilitySpec.AbilityDefinition, AbilitySpec.AbilityTag, AbilitySpec.Handle);
+	UGameplayStatics::FinishSpawningActor(Projectile, SpawnTransform);
+
+	const FMABSAbilityDebugEvent ProjectileSpawnedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::ProjectileSpawned,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Spawned projectile '%s' for ability '%s' at %s."),
+			*GetNameSafe(Projectile),
+			*GetAbilityLabel(AbilityDefinition),
+			*FormatVectorForDebug(SpawnTransform.GetLocation())));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(ProjectileSpawnedEvent);
+	}
+
+	return FinalizeAbilityCommit(AbilitySpec, EMABSDeliveryMode::Projectile, bNotifyOwningClient);
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::CompleteResolvedTargetAbility(
+	FMABSAbilitySpec& AbilitySpec,
+	AActor* TargetActor,
+	const EMABSDeliveryMode DeliveryMode,
+	const bool bNotifyOwningClient)
+{
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
 
 	FString EffectDebugMessage;
@@ -716,6 +1169,14 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 		EmitDebugEventToOwningClient(EffectAppliedEvent);
 	}
 
+	return FinalizeAbilityCommit(AbilitySpec, DeliveryMode, bNotifyOwningClient);
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::FinalizeAbilityCommit(
+	FMABSAbilitySpec& AbilitySpec,
+	const EMABSDeliveryMode DeliveryMode,
+	const bool bNotifyOwningClient)
+{
 	FString CostDebugMessage;
 	const EMABSAbilityActivationResult CostSpendResult = SpendAbilityCost(AbilitySpec, CostDebugMessage);
 	if (CostSpendResult != EMABSAbilityActivationResult::Success)
@@ -762,7 +1223,9 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 		AbilitySpec.Handle,
 		AbilitySpec.RuntimeState,
 		EMABSAbilityActivationResult::Success,
-		TEXT("Ability activation committed successfully."));
+		FString::Printf(
+			TEXT("Ability activation committed successfully using %s delivery."),
+			*GetDeliveryModeLabel(DeliveryMode)));
 	if (bNotifyOwningClient)
 	{
 		EmitDebugEventToOwningClient(DebugEvent);
@@ -805,13 +1268,6 @@ AActor* UMABSAbilityComponent::ResolveAbilityTarget(
 
 	case EMABSTargetType::Actor:
 		{
-			UWorld* const World = GetWorld();
-			if (World == nullptr)
-			{
-				OutDebugMessage = TEXT("Failed to resolve an actor target because the world was unavailable.");
-				return nullptr;
-			}
-
 			FVector TraceStart = FVector::ZeroVector;
 			FRotator TraceRotation = FRotator::ZeroRotator;
 			FString ViewPointDescription;
@@ -821,221 +1277,281 @@ AActor* UMABSAbilityComponent::ResolveAbilityTarget(
 				return nullptr;
 			}
 
-			FMABSTargetTraceDebugInfo TraceDebugInfo;
-			TraceDebugInfo.bHasTraceData = true;
-			TraceDebugInfo.AbilityTag = AbilitySpec.AbilityTag;
-			TraceDebugInfo.AbilityHandle = AbilitySpec.Handle;
-			TraceDebugInfo.TraceMode = AbilityDefinition->ActorTargetTraceMode;
 			FVector GameplayTraceStart = TraceStart;
 			FRotator UnusedTraceRotation = TraceRotation;
 			Owner->GetActorEyesViewPoint(GameplayTraceStart, UnusedTraceRotation);
-
-			TraceDebugInfo.TraceStart = GameplayTraceStart;
-			TraceDebugInfo.TraceEnd = GameplayTraceStart + (TraceRotation.Vector() * AbilityDefinition->TargetTraceDistance);
-			TraceDebugInfo.TraceRadius = AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
-				? AbilityDefinition->TargetTraceRadius
-				: 0.0f;
-			TraceDebugInfo.WorldTimeSeconds = World->GetTimeSeconds();
-			TraceDebugInfo.ViewPointDescription = FString::Printf(
-				TEXT("%sAim + OwnerEyesStart"),
-				*ViewPointDescription);
-
-			const FString TraceStartedMessage = FString::Printf(
-				TEXT("Started %s target trace from %s to %s using viewpoint '%s' with distance %.0f and radius %.0f."),
-				*GetTargetTraceModeLabel(TraceDebugInfo.TraceMode),
-				*FormatVectorForDebug(TraceDebugInfo.TraceStart),
-				*FormatVectorForDebug(TraceDebugInfo.TraceEnd),
-				*TraceDebugInfo.ViewPointDescription,
-				AbilityDefinition->TargetTraceDistance,
-				TraceDebugInfo.TraceRadius);
-			const FMABSAbilityDebugEvent TraceStartedEvent = EmitDebugEvent(
+			const FVector TraceEnd = GameplayTraceStart + (TraceRotation.Vector() * AbilityDefinition->TargetTraceDistance);
+			AActor* const ResolvedActor = ResolveActorTargetFromTrace(
+				AbilitySpec,
+				GameplayTraceStart,
+				TraceEnd,
+				EMABSDeliveryMode::Direct,
+				AbilityDefinition->ActorTargetTraceMode,
+				AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
+					? AbilityDefinition->TargetTraceRadius
+					: 0.0f,
+				AbilityDefinition->bIgnoreNonTargetWorldHits,
+				TEXT("Direct target trace"),
+				FString::Printf(TEXT("%sAim + OwnerEyesStart"), *ViewPointDescription),
 				MABSAbilityComponentEventNames::TargetTraceStarted,
-				AbilitySpec.AbilityTag,
-				AbilitySpec.Handle,
-				AbilitySpec.RuntimeState,
-				EMABSAbilityActivationResult::Success,
-				TraceStartedMessage);
-			if (bNotifyOwningClient)
+				MABSAbilityComponentEventNames::TargetTraceHit,
+				MABSAbilityComponentEventNames::TargetTraceRejected,
+				OutDebugMessage,
+				bNotifyOwningClient);
+
+			if (ResolvedActor != nullptr)
 			{
-				EmitDebugEventToOwningClient(TraceStartedEvent);
-			}
-
-			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MABSAbilityTargetTrace), false);
-			QueryParams.AddIgnoredActor(Owner);
-			const FCollisionObjectQueryParams ObjectQueryParams = MakeTargetTraceObjectQueryParams(*AbilityDefinition);
-
-			TArray<FHitResult> HitResults;
-			if (AbilityDefinition->ActorTargetTraceMode == EMABSTargetTraceMode::Sphere
-				&& AbilityDefinition->TargetTraceRadius > 0.0f)
-			{
-				const FCollisionShape TraceShape = FCollisionShape::MakeSphere(AbilityDefinition->TargetTraceRadius);
-				World->SweepMultiByObjectType(
-					HitResults,
-					TraceDebugInfo.TraceStart,
-					TraceDebugInfo.TraceEnd,
-					TraceRotation.Quaternion(),
-					ObjectQueryParams,
-					TraceShape,
-					QueryParams);
-			}
-			else
-			{
-				World->LineTraceMultiByObjectType(
-					HitResults,
-					TraceDebugInfo.TraceStart,
-					TraceDebugInfo.TraceEnd,
-					ObjectQueryParams,
-					QueryParams);
-			}
-
-			if (HitResults.IsEmpty())
-			{
-				TraceDebugInfo.ResultMessage = FString::Printf(
-					TEXT("Target trace found no blocking hit within %.0f units."),
-					AbilityDefinition->TargetTraceDistance);
-				RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
-				if (bNotifyOwningClient)
-				{
-					EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
-				}
-				DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
-				OutDebugMessage = TraceDebugInfo.ResultMessage;
-				return nullptr;
-			}
-
-			for (const FHitResult& HitResult : HitResults)
-			{
-				AActor* const HitActor = HitResult.GetActor();
-				TraceDebugInfo.bHit = true;
-				TraceDebugInfo.HitLocation = HitResult.ImpactPoint;
-				TraceDebugInfo.HitDistance = FVector::Distance(TraceDebugInfo.TraceStart, HitResult.ImpactPoint);
-				TraceDebugInfo.HitActorName = GetHitActorLabel(HitActor);
-				TraceDebugInfo.HitComponentName = GetNameSafe(HitResult.GetComponent());
-				TraceDebugInfo.WorldTimeSeconds = World->GetTimeSeconds();
-
-				if (HitActor == nullptr)
-				{
-					TraceDebugInfo.bAcceptedTarget = false;
-					TraceDebugInfo.ResultMessage = AbilityDefinition->bIgnoreNonTargetWorldHits
-						? FString::Printf(
-							TEXT("Rejected world hit on component '%s' at %.0f units and continued searching for a valid actor target."),
-							*TraceDebugInfo.HitComponentName,
-							TraceDebugInfo.HitDistance)
-						: FString::Printf(
-							TEXT("Rejected world hit on component '%s' at %.0f units because non-target world hits are not ignored."),
-							*TraceDebugInfo.HitComponentName,
-							TraceDebugInfo.HitDistance);
-
-					const FMABSAbilityDebugEvent TraceRejectedEvent = EmitDebugEvent(
-						MABSAbilityComponentEventNames::TargetTraceRejected,
-						AbilitySpec.AbilityTag,
-						AbilitySpec.Handle,
-						AbilitySpec.RuntimeState,
-						EMABSAbilityActivationResult::TargetResolutionFailed,
-						TraceDebugInfo.ResultMessage);
-					if (bNotifyOwningClient)
-					{
-						EmitDebugEventToOwningClient(TraceRejectedEvent);
-					}
-
-					RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
-					if (bNotifyOwningClient)
-					{
-						EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
-					}
-					if (AbilityDefinition->bIgnoreNonTargetWorldHits)
-					{
-						continue;
-					}
-
-					DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
-					OutDebugMessage = TraceDebugInfo.ResultMessage;
-					return nullptr;
-				}
-
-				FString RejectionReason;
-				if (!ValidateResolvedTargetActor(AbilitySpec, HitActor, RejectionReason))
-				{
-					TraceDebugInfo.bAcceptedTarget = false;
-					TraceDebugInfo.ResultMessage = FString::Printf(
-						TEXT("Rejected actor target '%s' on component '%s' at %.0f units: %s"),
-						*TraceDebugInfo.HitActorName,
-						*TraceDebugInfo.HitComponentName,
-						TraceDebugInfo.HitDistance,
-						*RejectionReason);
-
-					const FMABSAbilityDebugEvent TraceRejectedEvent = EmitDebugEvent(
-						MABSAbilityComponentEventNames::TargetTraceRejected,
-						AbilitySpec.AbilityTag,
-						AbilitySpec.Handle,
-						AbilitySpec.RuntimeState,
-						EMABSAbilityActivationResult::TargetResolutionFailed,
-						TraceDebugInfo.ResultMessage);
-					if (bNotifyOwningClient)
-					{
-						EmitDebugEventToOwningClient(TraceRejectedEvent);
-					}
-
-					RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
-					if (bNotifyOwningClient)
-					{
-						EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
-					}
-					DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
-					OutDebugMessage = TraceDebugInfo.ResultMessage;
-					return nullptr;
-				}
-
-				TraceDebugInfo.bAcceptedTarget = true;
-				TraceDebugInfo.ResultMessage = FString::Printf(
-					TEXT("Accepted actor target '%s' on component '%s' at %.0f units using %s trace."),
-					*TraceDebugInfo.HitActorName,
-					*TraceDebugInfo.HitComponentName,
-					TraceDebugInfo.HitDistance,
-					*GetTargetTraceModeLabel(TraceDebugInfo.TraceMode));
-
-				const FMABSAbilityDebugEvent TraceHitEvent = EmitDebugEvent(
-					MABSAbilityComponentEventNames::TargetTraceHit,
-					AbilitySpec.AbilityTag,
-					AbilitySpec.Handle,
-					AbilitySpec.RuntimeState,
-					EMABSAbilityActivationResult::Success,
-					TraceDebugInfo.ResultMessage);
-				if (bNotifyOwningClient)
-				{
-					EmitDebugEventToOwningClient(TraceHitEvent);
-				}
-
-				RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
-				if (bNotifyOwningClient)
-				{
-					EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
-				}
-				DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
 				OutDebugMessage = FString::Printf(
 					TEXT("Resolved target '%s' using target type '%s'. %s"),
-					*GetNameSafe(HitActor),
+					*GetNameSafe(ResolvedActor),
 					*GetTargetTypeLabel(AbilityDefinition->TargetType),
-					*TraceDebugInfo.ResultMessage);
-				return HitActor;
+					*OutDebugMessage);
 			}
 
-			DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
-			OutDebugMessage = TraceDebugInfo.ResultMessage.IsEmpty()
-				? FString::Printf(
-					TEXT("Failed to resolve an actor target using target type '%s' within %.0f units."),
-					*GetTargetTypeLabel(AbilityDefinition->TargetType),
-					AbilityDefinition->TargetTraceDistance)
-				: TraceDebugInfo.ResultMessage;
-			return nullptr;
+			return ResolvedActor;
 		}
 
 	default:
 		OutDebugMessage = FString::Printf(
-			TEXT("Failed to resolve a target because target type '%s' is not supported in Phase 2."),
+			TEXT("Failed to resolve a target because target type '%s' is not supported for direct delivery."),
 			*GetTargetTypeLabel(AbilityDefinition->TargetType));
 		return nullptr;
 	}
+}
+
+AActor* UMABSAbilityComponent::ResolveActorTargetFromTrace(
+	const FMABSAbilitySpec& AbilitySpec,
+	const FVector& TraceStart,
+	const FVector& TraceEnd,
+	const EMABSDeliveryMode DeliveryMode,
+	const EMABSTargetTraceMode TraceMode,
+	const float TraceRadius,
+	const bool bIgnoreNonTargetWorldHits,
+	const FString& TraceLabel,
+	const FString& ViewPointDescription,
+	const FName TraceStartedEventName,
+	const FName TraceHitEventName,
+	const FName TraceRejectedEventName,
+	FString& OutDebugMessage,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	AActor* const Owner = GetOwner();
+	UWorld* const World = GetWorld();
+	if (AbilityDefinition == nullptr || Owner == nullptr || World == nullptr)
+	{
+		OutDebugMessage = FString::Printf(TEXT("%s failed because the world, owner, or ability definition was invalid."), *TraceLabel);
+		return nullptr;
+	}
+
+	FMABSTargetTraceDebugInfo TraceDebugInfo;
+	TraceDebugInfo.bHasTraceData = true;
+	TraceDebugInfo.AbilityTag = AbilitySpec.AbilityTag;
+	TraceDebugInfo.AbilityHandle = AbilitySpec.Handle;
+	TraceDebugInfo.DeliveryMode = DeliveryMode;
+	TraceDebugInfo.TraceMode = TraceMode;
+	TraceDebugInfo.TraceStart = TraceStart;
+	TraceDebugInfo.TraceEnd = TraceEnd;
+	TraceDebugInfo.TraceRadius = TraceMode == EMABSTargetTraceMode::Sphere ? TraceRadius : 0.0f;
+	TraceDebugInfo.WorldTimeSeconds = World->GetTimeSeconds();
+	TraceDebugInfo.TraceLabel = TraceLabel;
+	TraceDebugInfo.ViewPointDescription = ViewPointDescription;
+	const EMABSAbilityActivationResult TraceFailureResult =
+		DeliveryMode == EMABSDeliveryMode::Direct
+			? EMABSAbilityActivationResult::TargetResolutionFailed
+			: EMABSAbilityActivationResult::DeliveryFailed;
+
+	if (TraceStartedEventName != NAME_None)
+	{
+		const FMABSAbilityDebugEvent TraceStartedEvent = EmitDebugEvent(
+			TraceStartedEventName,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			FString::Printf(
+				TEXT("Started %s using %s trace from %s to %s with viewpoint '%s' and radius %.0f."),
+				*TraceLabel,
+				*GetTargetTraceModeLabel(TraceMode),
+				*FormatVectorForDebug(TraceStart),
+				*FormatVectorForDebug(TraceEnd),
+				*ViewPointDescription,
+				TraceDebugInfo.TraceRadius));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(TraceStartedEvent);
+		}
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MABSAbilityDeliveryTrace), false);
+	QueryParams.AddIgnoredActor(Owner);
+	const FCollisionObjectQueryParams ObjectQueryParams = MakeTargetTraceObjectQueryParams(bIgnoreNonTargetWorldHits);
+
+	TArray<FHitResult> HitResults;
+	if (TraceMode == EMABSTargetTraceMode::Sphere && TraceRadius > 0.0f)
+	{
+		const FCollisionShape TraceShape = FCollisionShape::MakeSphere(TraceRadius);
+		World->SweepMultiByObjectType(
+			HitResults,
+			TraceStart,
+			TraceEnd,
+			(TraceEnd - TraceStart).GetSafeNormal().ToOrientationQuat(),
+			ObjectQueryParams,
+			TraceShape,
+			QueryParams);
+	}
+	else
+	{
+		World->LineTraceMultiByObjectType(
+			HitResults,
+			TraceStart,
+			TraceEnd,
+			ObjectQueryParams,
+			QueryParams);
+	}
+
+	if (HitResults.IsEmpty())
+	{
+		TraceDebugInfo.ResultMessage = FString::Printf(
+			TEXT("%s found no blocking hit between %s and %s."),
+			*TraceLabel,
+			*FormatVectorForDebug(TraceStart),
+			*FormatVectorForDebug(TraceEnd));
+		RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+		if (bNotifyOwningClient)
+		{
+			EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+		}
+		DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+		OutDebugMessage = TraceDebugInfo.ResultMessage;
+		return nullptr;
+	}
+
+	for (const FHitResult& HitResult : HitResults)
+	{
+		AActor* const HitActor = HitResult.GetActor();
+		TraceDebugInfo.bHit = true;
+		TraceDebugInfo.HitLocation = HitResult.ImpactPoint;
+		TraceDebugInfo.HitDistance = FVector::Distance(TraceStart, HitResult.ImpactPoint);
+		TraceDebugInfo.HitActorName = GetHitActorLabel(HitActor);
+		TraceDebugInfo.HitComponentName = GetNameSafe(HitResult.GetComponent());
+		TraceDebugInfo.WorldTimeSeconds = World->GetTimeSeconds();
+
+		if (HitActor == nullptr)
+		{
+			TraceDebugInfo.bAcceptedTarget = false;
+			TraceDebugInfo.ResultMessage = bIgnoreNonTargetWorldHits
+				? FString::Printf(
+					TEXT("%s rejected world hit on component '%s' at %.0f units and continued searching."),
+					*TraceLabel,
+					*TraceDebugInfo.HitComponentName,
+					TraceDebugInfo.HitDistance)
+				: FString::Printf(
+					TEXT("%s rejected world hit on component '%s' at %.0f units."),
+					*TraceLabel,
+					*TraceDebugInfo.HitComponentName,
+					TraceDebugInfo.HitDistance);
+
+			const FMABSAbilityDebugEvent TraceRejectedEvent = EmitDebugEvent(
+				TraceRejectedEventName,
+				AbilitySpec.AbilityTag,
+				AbilitySpec.Handle,
+				AbilitySpec.RuntimeState,
+				TraceFailureResult,
+				TraceDebugInfo.ResultMessage);
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(TraceRejectedEvent);
+			}
+
+			RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+			if (bNotifyOwningClient)
+			{
+				EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+			}
+
+			if (bIgnoreNonTargetWorldHits)
+			{
+				continue;
+			}
+
+			DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+			OutDebugMessage = TraceDebugInfo.ResultMessage;
+			return nullptr;
+		}
+
+		FString RejectionReason;
+		const bool bRequireValidActorTarget =
+			DeliveryMode == EMABSDeliveryMode::Direct ? AbilityDefinition->bRequireValidActorTarget : true;
+		if (!ValidateTargetActorForAbility(AbilityDefinition, Owner, HitActor, bRequireValidActorTarget, RejectionReason))
+		{
+			TraceDebugInfo.bAcceptedTarget = false;
+			TraceDebugInfo.ResultMessage = FString::Printf(
+				TEXT("%s rejected actor '%s' on component '%s' at %.0f units: %s"),
+				*TraceLabel,
+				*TraceDebugInfo.HitActorName,
+				*TraceDebugInfo.HitComponentName,
+				TraceDebugInfo.HitDistance,
+				*RejectionReason);
+
+			const FMABSAbilityDebugEvent TraceRejectedEvent = EmitDebugEvent(
+				TraceRejectedEventName,
+				AbilitySpec.AbilityTag,
+				AbilitySpec.Handle,
+				AbilitySpec.RuntimeState,
+				TraceFailureResult,
+				TraceDebugInfo.ResultMessage);
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(TraceRejectedEvent);
+			}
+
+			RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+			if (bNotifyOwningClient)
+			{
+				EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+			}
+			DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+			OutDebugMessage = TraceDebugInfo.ResultMessage;
+			return nullptr;
+		}
+
+		TraceDebugInfo.bAcceptedTarget = true;
+		TraceDebugInfo.ResultMessage = FString::Printf(
+			TEXT("%s accepted actor '%s' on component '%s' at %.0f units using %s trace."),
+			*TraceLabel,
+			*TraceDebugInfo.HitActorName,
+			*TraceDebugInfo.HitComponentName,
+			TraceDebugInfo.HitDistance,
+			*GetTargetTraceModeLabel(TraceMode));
+
+		const FMABSAbilityDebugEvent TraceHitEvent = EmitDebugEvent(
+			TraceHitEventName,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			TraceDebugInfo.ResultMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(TraceHitEvent);
+		}
+
+		RecordLatestTargetTraceDebugInfo(TraceDebugInfo);
+		if (bNotifyOwningClient)
+		{
+			EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+		}
+		DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+		OutDebugMessage = TraceDebugInfo.ResultMessage;
+		return HitActor;
+	}
+
+	DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
+	OutDebugMessage = TraceDebugInfo.ResultMessage.IsEmpty()
+		? FString::Printf(TEXT("%s failed to resolve a valid actor target."), *TraceLabel)
+		: TraceDebugInfo.ResultMessage;
+	return nullptr;
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
@@ -1043,11 +1559,18 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
 	AActor* TargetActor,
 	FString& OutDebugMessage) const
 {
-	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
-	AActor* const Owner = GetOwner();
-	if (AbilityDefinition == nullptr || Owner == nullptr || TargetActor == nullptr)
+	return ApplyInstantEffectFromSource(AbilitySpec.AbilityDefinition, GetOwner(), TargetActor, OutDebugMessage);
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffectFromSource(
+	const UMABSAbilityDefinition* AbilityDefinition,
+	AActor* SourceActor,
+	AActor* TargetActor,
+	FString& OutDebugMessage) const
+{
+	if (AbilityDefinition == nullptr || SourceActor == nullptr || TargetActor == nullptr)
 	{
-		OutDebugMessage = TEXT("Failed to apply the instant effect because the ability definition, owner, or target was invalid.");
+		OutDebugMessage = TEXT("Failed to apply the instant effect because the ability definition, source actor, or target was invalid.");
 		return EMABSAbilityActivationResult::EffectApplicationFailed;
 	}
 
@@ -1058,8 +1581,8 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
 			const float AppliedDamage = UGameplayStatics::ApplyDamage(
 				TargetActor,
 				AbilityDefinition->EffectMagnitude,
-				Owner->GetInstigatorController(),
-				Owner,
+				SourceActor->GetInstigatorController(),
+				SourceActor,
 				UDamageType::StaticClass());
 
 			if (AppliedDamage <= 0.0f)
@@ -1093,8 +1616,8 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
 			const bool bAppliedHeal = IMABSInstantEffectReceiver::Execute_ApplyMABSHeal(
 				TargetActor,
 				AbilityDefinition->EffectMagnitude,
-				Owner,
-				AbilitySpec.AbilityDefinition);
+				SourceActor,
+				const_cast<UMABSAbilityDefinition*>(AbilityDefinition));
 			if (!bAppliedHeal)
 			{
 				OutDebugMessage = FString::Printf(
@@ -1114,10 +1637,88 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
 
 	default:
 		OutDebugMessage = FString::Printf(
-			TEXT("Failed to apply the instant effect because effect type '%s' is not supported in Phase 2."),
+			TEXT("Failed to apply the instant effect because effect type '%s' is not supported."),
 			*GetInstantEffectTypeLabel(AbilityDefinition->InstantEffectType));
 		return EMABSAbilityActivationResult::EffectApplicationFailed;
 	}
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::HandleProjectileImpact(
+	AMABSProjectileBase& Projectile,
+	AActor* HitActor,
+	const FHitResult& HitResult)
+{
+	UMABSAbilityDefinition* const AbilityDefinition = Projectile.GetSourceAbilityDefinition();
+	AActor* const SourceActor = Projectile.GetSourceActor();
+	if (AbilityDefinition == nullptr || SourceActor == nullptr)
+	{
+		return EMABSAbilityActivationResult::DeliveryFailed;
+	}
+
+	FString ImpactDebugMessage;
+	FString RejectionReason;
+	if (!ValidateTargetActorForAbility(AbilityDefinition, SourceActor, HitActor, true, RejectionReason))
+	{
+		ImpactDebugMessage = HitActor == nullptr
+			? FString::Printf(
+				TEXT("Projectile impact was rejected at %s because no valid actor was hit."),
+				*FormatVectorForDebug(HitResult.ImpactPoint))
+			: FString::Printf(
+				TEXT("Projectile impact on '%s' was rejected: %s"),
+				*GetNameSafe(HitActor),
+				*RejectionReason);
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ProjectileImpactRejected,
+			Projectile.GetSourceAbilityTag(),
+			Projectile.GetSourceAbilityHandle(),
+			EMABSAbilityRuntimeState::Idle,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			ImpactDebugMessage);
+		EmitDebugEventToOwningClient(DebugEvent);
+		return EMABSAbilityActivationResult::DeliveryFailed;
+	}
+
+	const EMABSAbilityActivationResult EffectResult = ApplyInstantEffectFromSource(
+		AbilityDefinition,
+		SourceActor,
+		HitActor,
+		ImpactDebugMessage);
+	if (EffectResult != EMABSAbilityActivationResult::Success)
+	{
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ProjectileImpactRejected,
+			Projectile.GetSourceAbilityTag(),
+			Projectile.GetSourceAbilityHandle(),
+			EMABSAbilityRuntimeState::Idle,
+			EffectResult,
+			ImpactDebugMessage);
+		EmitDebugEventToOwningClient(DebugEvent);
+		return EffectResult;
+	}
+
+	const FMABSAbilityDebugEvent EffectAppliedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::EffectApplied,
+		Projectile.GetSourceAbilityTag(),
+		Projectile.GetSourceAbilityHandle(),
+		EMABSAbilityRuntimeState::Idle,
+		EMABSAbilityActivationResult::Success,
+		ImpactDebugMessage);
+	EmitDebugEventToOwningClient(EffectAppliedEvent);
+
+	const FMABSAbilityDebugEvent ProjectileImpactEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::ProjectileImpact,
+		Projectile.GetSourceAbilityTag(),
+		Projectile.GetSourceAbilityHandle(),
+		EMABSAbilityRuntimeState::Idle,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Projectile impacted '%s' at %s and applied its effect."),
+			*GetNameSafe(HitActor),
+			*FormatVectorForDebug(HitResult.ImpactPoint)));
+	EmitDebugEventToOwningClient(ProjectileImpactEvent);
+
+	return EMABSAbilityActivationResult::Success;
 }
 
 bool UMABSAbilityComponent::ShouldValidateAbilityCost(const FMABSAbilitySpec& AbilitySpec) const
@@ -1476,13 +2077,46 @@ bool UMABSAbilityComponent::GetTargetTraceViewPoint(
 	return true;
 }
 
-bool UMABSAbilityComponent::ValidateResolvedTargetActor(
-	const FMABSAbilitySpec& AbilitySpec,
+bool UMABSAbilityComponent::GetProjectileSpawnTransform(
+	const UMABSAbilityDefinition& AbilityDefinition,
+	FTransform& OutSpawnTransform,
+	FString& OutDebugMessage) const
+{
+	const AActor* const Owner = GetOwner();
+	if (Owner == nullptr)
+	{
+		OutDebugMessage = TEXT("Projectile delivery failed because the owning actor was invalid.");
+		return false;
+	}
+
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	FString ViewPointDescription;
+	if (!GetTargetTraceViewPoint(ViewLocation, ViewRotation, ViewPointDescription))
+	{
+		OutDebugMessage = TEXT("Projectile delivery failed because the projectile spawn viewpoint was unavailable.");
+		return false;
+	}
+
+	FVector SpawnOrigin = ViewLocation;
+	FRotator UnusedSpawnRotation = ViewRotation;
+	Owner->GetActorEyesViewPoint(SpawnOrigin, UnusedSpawnRotation);
+	const FVector SpawnLocation = SpawnOrigin + ViewRotation.RotateVector(AbilityDefinition.ProjectileSpawnOffset);
+	OutSpawnTransform = FTransform(ViewRotation, SpawnLocation);
+	OutDebugMessage = FString::Printf(
+		TEXT("Prepared projectile spawn at %s using viewpoint '%s'."),
+		*FormatVectorForDebug(SpawnLocation),
+		*ViewPointDescription);
+	return true;
+}
+
+bool UMABSAbilityComponent::ValidateTargetActorForAbility(
+	const UMABSAbilityDefinition* AbilityDefinition,
+	const AActor* SourceActor,
 	const AActor* CandidateActor,
+	const bool bRequireValidActorTarget,
 	FString& OutRejectionReason) const
 {
-	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
-	const AActor* const Owner = GetOwner();
 	if (AbilityDefinition == nullptr)
 	{
 		OutRejectionReason = TEXT("the ability definition was invalid.");
@@ -1495,13 +2129,13 @@ bool UMABSAbilityComponent::ValidateResolvedTargetActor(
 		return false;
 	}
 
-	if (CandidateActor == Owner)
+	if (CandidateActor == SourceActor)
 	{
-		OutRejectionReason = TEXT("self actor hits are not valid for actor targeting.");
+		OutRejectionReason = TEXT("self actor hits are not valid targets for this ability.");
 		return false;
 	}
 
-	if (!AbilityDefinition->bRequireValidActorTarget)
+	if (!bRequireValidActorTarget)
 	{
 		return true;
 	}

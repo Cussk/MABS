@@ -21,6 +21,7 @@ enum class EMABSAbilityActivationResult : uint8
 	OnCooldown UMETA(DisplayName="On Cooldown"),
 	InsufficientResources UMETA(DisplayName="Insufficient Resources"),
 	AuthorityRejected UMETA(DisplayName="Authority Rejected"),
+	DeliveryFailed UMETA(DisplayName="Delivery Failed"),
 	TargetResolutionFailed UMETA(DisplayName="Target Resolution Failed"),
 	EffectApplicationFailed UMETA(DisplayName="Effect Application Failed")
 };
@@ -55,6 +56,15 @@ enum class EMABSAbilityActivationPolicy : uint8
 {
 	OnInputTriggered UMETA(DisplayName="On Input Triggered"),
 	Passive UMETA(DisplayName="Passive")
+};
+
+UENUM(BlueprintType)
+enum class EMABSDeliveryMode : uint8
+{
+	Direct UMETA(DisplayName="Direct"),
+	HitTrace UMETA(DisplayName="HitTrace"),
+	Melee UMETA(DisplayName="Melee"),
+	Projectile UMETA(DisplayName="Projectile")
 };
 
 UENUM(BlueprintType)

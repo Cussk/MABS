@@ -9,7 +9,10 @@
 #include "Types/MABSAbilityTypes.h"
 #include "MABSAbilityComponent.generated.h"
 
+class AMABSProjectileBase;
+class AActor;
 class UMABSAbilityDefinition;
+struct FHitResult;
 
 UCLASS(ClassGroup=(MABS), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
 class MABSGAMEPLAY_API UMABSAbilityComponent : public UActorComponent
@@ -77,6 +80,8 @@ protected:
 
 private:
 
+	friend class AMABSProjectileBase;
+
 	UFUNCTION(Server, Reliable)
 	void ServerTryActivateAbilityByTag(FGameplayTag AbilityTag);
 
@@ -92,12 +97,58 @@ private:
 
 	EMABSAbilityActivationResult CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
+	AActor* ExecuteDirectDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
+
+	AActor* ExecuteHitTraceDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
+
+	AActor* ExecuteMeleeDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
+
+	EMABSAbilityActivationResult ExecuteProjectileDelivery(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+
+	EMABSAbilityActivationResult CompleteResolvedTargetAbility(
+		FMABSAbilitySpec& AbilitySpec,
+		AActor* TargetActor,
+		EMABSDeliveryMode DeliveryMode,
+		bool bNotifyOwningClient);
+
+	EMABSAbilityActivationResult FinalizeAbilityCommit(
+		FMABSAbilitySpec& AbilitySpec,
+		EMABSDeliveryMode DeliveryMode,
+		bool bNotifyOwningClient);
+
 	AActor* ResolveAbilityTarget(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
+
+	AActor* ResolveActorTargetFromTrace(
+		const FMABSAbilitySpec& AbilitySpec,
+		const FVector& TraceStart,
+		const FVector& TraceEnd,
+		EMABSDeliveryMode DeliveryMode,
+		EMABSTargetTraceMode TraceMode,
+		float TraceRadius,
+		bool bIgnoreNonTargetWorldHits,
+		const FString& TraceLabel,
+		const FString& ViewPointDescription,
+		FName TraceStartedEventName,
+		FName TraceHitEventName,
+		FName TraceRejectedEventName,
+		FString& OutDebugMessage,
+		bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult ApplyInstantEffect(
 		const FMABSAbilitySpec& AbilitySpec,
 		AActor* TargetActor,
 		FString& OutDebugMessage) const;
+
+	EMABSAbilityActivationResult ApplyInstantEffectFromSource(
+		const UMABSAbilityDefinition* AbilityDefinition,
+		AActor* SourceActor,
+		AActor* TargetActor,
+		FString& OutDebugMessage) const;
+
+	EMABSAbilityActivationResult HandleProjectileImpact(
+		AMABSProjectileBase& Projectile,
+		AActor* HitActor,
+		const FHitResult& HitResult);
 
 	FMABSAbilitySpec* FindGrantedAbilitySpecByTagMutable(const FGameplayTag& AbilityTag);
 
@@ -151,7 +202,14 @@ private:
 
 	bool GetTargetTraceViewPoint(FVector& OutTraceStart, FRotator& OutTraceRotation, FString& OutViewPointDescription) const;
 
-	bool ValidateResolvedTargetActor(const FMABSAbilitySpec& AbilitySpec, const AActor* CandidateActor, FString& OutRejectionReason) const;
+	bool GetProjectileSpawnTransform(const UMABSAbilityDefinition& AbilityDefinition, FTransform& OutSpawnTransform, FString& OutDebugMessage) const;
+
+	bool ValidateTargetActorForAbility(
+		const UMABSAbilityDefinition* AbilityDefinition,
+		const AActor* SourceActor,
+		const AActor* CandidateActor,
+		bool bRequireValidActorTarget,
+		FString& OutRejectionReason) const;
 
 	void DrawTargetTraceDebug(const UMABSAbilityDefinition& AbilityDefinition, const FMABSTargetTraceDebugInfo& DebugInfo) const;
 

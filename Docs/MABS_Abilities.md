@@ -2,17 +2,17 @@
 
 ## What it is
 
-This document explains the current Phase 7 ability model: authored definitions, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional montage playback, and presentation.
+This document explains the current Phase 7.5 ability model: authored definitions, optional grouped ability sets, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional montage playback, and presentation.
 
 ## Why it exists
 
 MABS stays readable by keeping authored data separate from live runtime state.
 
-Phase 7 extends the Phase 6.5 model without turning it into a large effect-spec framework. Combos, AoE, and periodic effects are grouped authored data on the ability definition, while runtime timing, combo queueing, and active periodic entries stay on the ability component side.
+Phase 7.5 keeps the Phase 7 combat model and adds a small authoring convenience: designers can now group multiple `UMABSAbilityDefinition` assets into one `UMABSAbilitySet` and grant them together.
 
 ## Ability definitions
 
-`UMABSAbilityDefinition` is the authored asset in `MABSCore`.
+`UMABSAbilityDefinition` is the authored single-ability asset in `MABSCore`.
 
 Current authored fields cover:
 
@@ -24,28 +24,26 @@ Current authored fields cover:
 * presentation: `StartupPresentation`, `DeliveryPresentation`, and `ImpactPresentation`
 * combat breadth: `Combo`, `AoE`, and `PeriodicEffect`
 
-Current delivery modes are:
+## Ability sets
 
-* `Direct`
-* `HitTrace`
-* `Melee`
-* `Projectile`
+`UMABSAbilitySet` is the authored grouped-grant asset in `MABSCore`.
 
-## Presentation authoring
+It currently contains:
 
-Presentation still uses grouped data:
+* `AbilityDefinitions`
 
-* `StartupPresentation.Cue`
-* `DeliveryPresentation.Cue`
-* `DeliveryPresentation.HitTraceTracer`
-* `DeliveryPresentation.ProjectileTravel`
-* `ImpactPresentation.Cue`
+Use it when several abilities should be granted together, such as:
 
-Phase 7 does not change the cue model. Combo, AoE, and periodic effects plug into the same gameplay timing and debug flow.
+* starting abilities
+* class or archetype bundles
+* enemy bundles
+* test bundles
+
+Ability sets do not replace individual ability definitions. They only group them for grant authoring.
 
 ## Granted abilities
 
-Granting creates a `FMABSAbilitySpec` on `UMABSAbilityComponent`.
+Granting still creates a `FMABSAbilitySpec` on `UMABSAbilityComponent`.
 
 Each spec stores:
 
@@ -62,9 +60,11 @@ Each spec stores:
 * the combo window end time
 * the queued combo follow-up tag, when one has been buffered
 
+Ability sets do not add a second runtime state container. They reuse this same existing grant path.
+
 ## Activation flow
 
-Activation in Phase 7 means:
+Activation in Phase 7.5 still means:
 
 1. code or input calls `TryActivateAbilityByTag`
 2. the request reaches authority
@@ -87,7 +87,8 @@ Activation in Phase 7 means:
 
 Authored data answers:
 
-* what the ability should do
+* what one ability should do
+* how multiple abilities should be grouped for grant authoring
 * which delivery mode it uses
 * whether it can branch into a combo follow-up
 * whether it resolves an AoE shape
@@ -96,8 +97,8 @@ Authored data answers:
 
 Runtime state answers:
 
-* whether the ability is granted
-* whether it is idle, in startup, active, recovery, or blocked
+* which abilities are granted
+* whether a granted ability is idle, in startup, active, recovery, or blocked
 * what happened on the last activation request
 * when its personal cooldown ends
 * when startup began
@@ -108,25 +109,21 @@ Runtime state answers:
 
 ## How to use it
 
-1. Create a `UMABSAbilityDefinition`.
-2. Set `TargetType`, `DeliveryMode`, timing, cost, and cooldown data.
-3. Configure instant effect, periodic effect, or both.
-4. Fill `Combo` when authoring a melee follow-up chain.
-5. Fill `AoE` when the ability should affect more than one actor.
-6. Fill the presentation groups that matter for that delivery mode.
-7. Grant the ability on authority.
-8. Activate it with `TryActivateAbilityByTag`.
-9. Inspect `FMABSAbilitySpec`, active periodic effects, recent debug events, and the overlay.
+1. Create one or more `UMABSAbilityDefinition` assets.
+2. Optionally create a `UMABSAbilitySet`.
+3. Fill `AbilityDefinitions` when several abilities should be granted together.
+4. Grant either the definition or the set on authority.
+5. Activate abilities with `TryActivateAbilityByTag`.
+6. Inspect `FMABSAbilitySpec`, active periodic effects, and recent debug events.
 
 ## Example
 
-Example three-hit sword opener:
+Example grouped player starter:
 
-* `DeliveryMode = Melee`
-* `Combo.NextComboAbilityTag = Ability.Combat.Attack2`
-* `Combo.ComboWindowStart = 0.18`
-* `Combo.ComboWindowEnd = 0.42`
-* `Combo.bBufferComboInput = true`
+* `DA_Player_Attack`
+* `DA_Player_Dodge`
+* `DA_Player_Heal`
+* `DA_StartingAbilities_Player.AbilityDefinitions = [Attack, Dodge, Heal]`
 
 Example explosive fireball:
 

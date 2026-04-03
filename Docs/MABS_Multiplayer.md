@@ -2,17 +2,18 @@
 
 ## What it is
 
-This document explains how Phase 7 handles multiplayer authority for activation, delivery, combo acceptance, AoE target resolution, periodic effects, costs, cooldowns, projectile runtime, cue routing, and cosmetic realization.
+This document explains how Phase 7.5 handles multiplayer authority for grouped granting, activation, delivery, combo acceptance, AoE target resolution, periodic effects, costs, cooldowns, projectile runtime, cue routing, and cosmetic realization.
 
 ## Why it exists
 
-Phase 7 adds more combat breadth, but the same rule still holds: gameplay results must stay authoritative on the server, while clients get enough replicated state and debug visibility to understand what happened.
+Phase 7.5 adds ability-set authoring and grouped granting, but the same rule still holds: gameplay results must stay authoritative on the server, while clients get enough replicated state and debug visibility to understand what happened.
 
 ## Server authority
 
 The server owns:
 
-* granting
+* single ability granting
+* ability-set granting
 * cooldown validation
 * cost validation and spending
 * combo window timing and combo acceptance
@@ -35,10 +36,21 @@ Clients may request:
 
 Clients do not authoritatively decide:
 
+* whether a grouped grant is valid
 * whether a combo request was valid
 * which AoE actors were accepted
 * when periodic ticks happen
 * when periodic effects expire
+
+## Ability sets in multiplayer
+
+Ability sets do not create a separate replication or authority model.
+
+Grouped granting still means:
+
+* authority iterates the authored set
+* each valid entry uses the normal `GrantAbility(...)` path
+* `GrantedAbilities` remains the authoritative replicated runtime state
 
 ## Cue routing in multiplayer
 
@@ -50,13 +62,14 @@ The visibility policy model from Phase 6.5 still applies:
 * `OwnerOnly`
 * `LocalOnly`
 
-Combo, AoE, and periodic effects do not change that cosmetic routing model.
+Ability sets do not change that cosmetic routing model.
 
 ## Dedicated server behavior
 
 Dedicated servers:
 
 * still make authoritative gameplay decisions
+* still grant abilities and ability sets
 * still route cosmetic results outward when needed
 * do not realize local VFX, SFX, or camera shake
 * still run combo timers and periodic timers authoritatively
@@ -65,20 +78,17 @@ Dedicated servers:
 
 Singleplayer:
 
-* combo follow-ups queue and auto-trigger correctly
-* AoE hits multiple valid actors
-* periodic ticks and expiration are readable
+* starting ability sets grant all valid entries
+* null entries are skipped safely
+* duplicate entries follow the normal grant policy
 
 Listen server:
 
-* host combo behavior works correctly
-* remote combo requests are validated on authority
-* AoE remains authoritative
-* periodic ticks remain authoritative
+* host grouped grant behavior works correctly
+* remote client-owned actors receive granted abilities through authority
 
 Dedicated server:
 
-* combo acceptance remains authoritative
-* AoE resolution remains authoritative
-* periodic ticking remains authoritative
+* grouped granting remains authoritative
+* normal granted ability replication still works
 * server builds do not depend on cosmetic realization

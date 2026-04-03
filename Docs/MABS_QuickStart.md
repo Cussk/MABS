@@ -2,25 +2,24 @@
 
 ## What it is
 
-This guide covers the current Phase 6 setup. MABS now supports:
+This guide covers the current Phase 7.5 setup. MABS now supports:
 
+* individual `UMABSAbilityDefinition` assets
+* grouped `UMABSAbilitySet` assets
 * `Direct`, `HitTrace`, `Melee`, and `Projectile` delivery
-* authored `StartupDuration`, `DeliveryTime`, and `RecoveryDuration`
-* socket-first delivery origins
-* optional activation montage requests
-* authored startup, delivery, tracer, projectile-travel, and impact presentation
+* authored startup, delivery, and recovery timing
+* optional combo, AoE, and periodic effect data
+* startup, delivery, tracer, projectile-travel, and impact presentation
 
 ## Why it exists
 
-The goal is to get from a blank actor or character to a multiplayer-safe ability that:
+The goal is to get from a blank actor or character to a multiplayer-safe ability workflow that:
 
-* validates on authority
-* enters `Startup`
-* delivers at an authored time
-* plays cosmetics at startup, delivery, and impact
-* enters `Recovery`
-* spends cost and starts cooldown only after successful delivery
-* explains timing, socket, tracer, and impact behavior through debug events
+* validates and grants on authority
+* lets designers author one ability at a time
+* optionally groups multiple abilities into a starting bundle
+* activates by gameplay tag through the normal existing runtime path
+* exposes readable debug events for grant, activation, delivery, effect, and set-grant flow
 
 ## How to use it
 
@@ -28,68 +27,62 @@ The goal is to get from a blank actor or character to a multiplayer-safe ability
 
 Add the component to the actor or character that owns abilities.
 
-### Step 2: Create a `UMABSAbilityDefinition`
+### Step 2: Create one or more `UMABSAbilityDefinition` assets
 
 Set:
 
 * core ability fields
+* target and delivery fields
 * timing fields
-* delivery fields
-* socket fields
-* optional montage fields
+* optional combo, AoE, or periodic effect fields
+* optional presentation fields
 
-### Step 3: Fill presentation data
+### Step 3: Optionally create a `UMABSAbilitySet`
 
-Startup:
+Create a data asset of type `UMABSAbilitySet` and fill `AbilityDefinitions` with the abilities that should be granted together.
 
-* `StartupPresentation.Cue`
+Use sets for:
 
-Delivery:
+* starting player abilities
+* archetype loadouts
+* enemy ability bundles
+* test harness bundles
 
-* `DeliveryPresentation.Cue`
-* `DeliveryPresentation.HitTraceTracer`
-* `DeliveryPresentation.ProjectileTravel`
+### Step 4: Grant on authority
 
-Impact:
+Grant either:
 
-* `ImpactPresentation.Cue`
+* a single ability with `GrantAbility(...)`
+* one set with `GrantAbilitySet(...)`
+* multiple sets with `GrantAbilitySets(...)`
 
-### Step 4: Grant and activate
+Grouped granting is a convenience workflow only. It still uses the normal per-ability grant rules.
 
-Grant the ability on authority and call `TryActivateAbilityByTag`.
+### Step 5: Activate by tag
 
-Phase 6 flow is:
-
-1. authority validates the request
-2. startup begins
-3. startup presentation triggers if authored
-4. delivery executes at the authored delivery time
-5. delivery presentation triggers at that same time
-6. hit trace may spawn a tracer, and projectiles may start travel presentation
-7. impact presentation triggers after successful effect application or projectile impact
-8. cost and cooldown finalize only after successful gameplay commit
-9. the ability enters `Recovery` and later returns to `Idle`
+Call `TryActivateAbilityByTag(...)` with the tag of a granted ability.
 
 ## Example setups
 
-Example self-heal:
+Example starting player bundle:
 
-* `DeliveryMode = Direct`
-* `StartupPresentation.Cue.SFX = Heal_Cast`
-* `ImpactPresentation.Cue.VFX = P_HealBurst`
+* create `DA_Player_Attack`
+* create `DA_Player_Dodge`
+* create `DA_Player_Heal`
+* create `DA_StartingAbilities_Player` as a `UMABSAbilitySet`
+* fill `AbilityDefinitions` with the three ability assets
+* call `GrantAbilitySet(DA_StartingAbilities_Player)` on the server at spawn
 
-Example rifle shot:
-
-* `DeliveryMode = HitTrace`
-* `HitTraceOriginSocketName = Muzzle`
-* `DeliveryPresentation.Cue.VFX = P_RifleMuzzle`
-* `DeliveryPresentation.HitTraceTracer.TracerVFX = P_RifleTracer`
-* `ImpactPresentation.Cue.VFX = P_BulletImpact`
-
-Example fireball:
+Example single authored projectile:
 
 * `DeliveryMode = Projectile`
 * `ProjectileActorClass = BP_MABS_Fireball`
 * `DeliveryPresentation.Cue.VFX = P_FireballCast`
 * `DeliveryPresentation.ProjectileTravel.TravelVFX = P_FireballTrail`
 * `ImpactPresentation.Cue.VFX = P_FireballImpact`
+
+## Multiplayer note
+
+Ability sets do not add a separate replication model.
+
+The server still grants the underlying abilities one by one through the existing authority path, and granted runtime state still lives on `UMABSAbilityComponent`.

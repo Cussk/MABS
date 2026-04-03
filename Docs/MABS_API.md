@@ -2,7 +2,7 @@
 
 ## What it is
 
-This document lists the current Phase 7 public surface for MABS and shows which module owns authored combo / AoE / periodic data, runtime combo state, periodic runtime entries, and the main gameplay component API.
+This document lists the current Phase 7.5 public surface for MABS and shows which module owns authored ability-set data, granted runtime state, and grouped grant helpers.
 
 ## Module ownership
 
@@ -32,10 +32,11 @@ Owns shared authored data and runtime types:
 * `FMABSTracerCueEvent`
 * `FMABSProjectileTravelCueEvent`
 * `UMABSAbilityDefinition`
+* `UMABSAbilitySet`
 
 ### `MABSGameplay`
 
-Owns gameplay and cue execution:
+Owns gameplay and grant execution:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
@@ -49,48 +50,43 @@ Owns runtime-safe debug helpers:
 * `UMABSDebugBlueprintLibrary`
 * `AMABSDebugHUD`
 
-## Important authored fields
+## Important authored assets
 
-### `FMABSComboData`
+### `UMABSAbilityDefinition`
 
-Combo authored fields:
+Owns authored per-ability fields such as:
 
-* `NextComboAbilityTag`
-* `ComboWindowStart`
-* `ComboWindowEnd`
-* `bBufferComboInput`
+* `AbilityTag`
+* `DeliveryMode`
+* `TargetType`
+* timing fields
+* presentation groups
+* `Combo`
+* `AoE`
+* `PeriodicEffect`
 
-### `FMABSAoEData`
+### `UMABSAbilitySet`
 
-AoE authored fields:
+Owns grouped grant authoring through:
 
-* `bEnabled`
-* `Shape`
-* `Radius`
-* `BoxExtent`
-* `CapsuleRadius`
-* `CapsuleHalfHeight`
-* `Offset`
+* `AbilityDefinitions`
 
-### `FMABSPeriodicEffectData`
-
-Periodic authored fields:
-
-* `bEnabled`
-* `EffectType`
-* `Duration`
-* `TickInterval`
-* `TickMagnitude`
+`UMABSAbilitySet` does not store runtime grant state. It is only a grouped authoring asset.
 
 ## Important runtime types
 
 ### `FMABSAbilitySpec`
 
-Phase 7 adds combo runtime fields:
+Granted runtime state still lives here:
 
-* `ComboWindowStartTime`
-* `ComboWindowEndTime`
-* `QueuedComboAbilityTag`
+* definition reference
+* granted handle
+* runtime state
+* last activation result
+* cooldown timing
+* startup, delivery, and recovery timestamps
+* combo window timestamps
+* queued combo follow-up tag
 
 ### `FMABSActivePeriodicEffect`
 
@@ -108,9 +104,15 @@ Authority-side periodic runtime fields:
 * `AppliedWorldTime`
 * `ExpirationWorldTime`
 
-### `UMABSAbilityComponent`
+## Important `UMABSAbilityComponent` API
 
-Important Phase 7 API points:
+Granting:
+
+* `GrantAbility(...)`
+* `GrantAbilitySet(...)`
+* `GrantAbilitySets(...)`
+
+Activation and queries:
 
 * `TryActivateAbilityByTag(...)`
 * `GetGrantedAbilities()`
@@ -120,15 +122,10 @@ Important Phase 7 API points:
 
 ## Important debug events
 
-Phase 7 adds or highlights:
+Phase 7.5 adds or highlights:
 
-* `ComboWindowStarted`
-* `ComboWindowEnded`
-* `ComboQueued`
-* `ComboRejected`
-* `AoEResolved`
-* `AoETargetRejected`
-* `PeriodicEffectApplied`
-* `PeriodicEffectRefreshed`
-* `PeriodicEffectTick`
-* `PeriodicEffectExpired`
+* `AbilitySetGranted`
+* `AbilitySetGrantSkipped`
+* `AbilitySetGrantFailed`
+
+Earlier grant, activation, delivery, effect, combo, AoE, and periodic events still remain.

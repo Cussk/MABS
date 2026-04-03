@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the current Phase 7 module layout for MABS after combo, AoE, and periodic runtime support were added.
+This document explains the current Phase 7.5 module layout for MABS after ability-set authoring and grouped grant support were added.
 
 ## Why it exists
 
-Phase 7 adds new combat data and more authority-side runtime work, but the module split still keeps authored data, runtime execution, and debug display separate and readable.
+Phase 7.5 adds new grouped authoring and grouped grant flow, but the module split still keeps authored data, runtime execution, and debug display separate and readable.
 
 ## Module map
 
@@ -15,6 +15,7 @@ Phase 7 adds new combat data and more authority-side runtime work, but the modul
 Owns:
 
 * `UMABSAbilityDefinition`
+* `UMABSAbilitySet`
 * ability runtime structs and enums
 * authored timing fields
 * authored socket fields
@@ -33,6 +34,8 @@ Owns:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
+* single-ability granting
+* grouped set granting
 * timer-based startup, delivery, recovery, combo, and periodic scheduling
 * authority-side combo queueing
 * authority-side AoE resolution
@@ -44,7 +47,6 @@ Owns:
 * cue routing helpers for startup, delivery, tracer, travel, and impact
 * owner-only, local-only, and relevant-client cue handling
 * local cue realization helpers
-* instant effects
 * cooldown and cost integration
 * replication and cosmetic routing
 
@@ -54,7 +56,7 @@ Owns:
 
 * runtime-safe debug formatting
 * the HUD overlay
-* display of timing state, combo queue state, trace state, and recent combo / AoE / periodic events
+* display of grant, grouped-grant, timing state, combo queue state, trace state, and recent gameplay events
 
 ### `MABSEditor`
 

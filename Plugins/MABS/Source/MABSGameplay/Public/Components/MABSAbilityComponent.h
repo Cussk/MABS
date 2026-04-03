@@ -22,6 +22,7 @@ class USceneComponent;
 class USkeletalMeshComponent;
 class USoundBase;
 class UMABSAbilityDefinition;
+class UMABSAbilitySet;
 struct FHitResult;
 
 struct FMABSAbilityExecutionContext
@@ -65,6 +66,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Abilities")
 	FMABSAbilityHandle GrantAbility(UMABSAbilityDefinition* AbilityDefinition);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Abilities")
+	int32 GrantAbilitySet(UMABSAbilitySet* AbilitySet);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Abilities")
+	int32 GrantAbilitySets(const TArray<UMABSAbilitySet*>& AbilitySets);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Abilities")
 	bool SetAbilityBlockedByTag(FGameplayTag AbilityTag, bool bBlocked);

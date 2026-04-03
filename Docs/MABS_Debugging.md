@@ -2,15 +2,15 @@
 
 ## What it is
 
-This document explains the current Phase 7 debugging tools for MABS.
+This document explains the current Phase 7.5 debugging tools for MABS.
 
 ## Why it exists
 
-Phase 7 adds combo queueing, AoE target gathering, and timer-driven periodic effects. Those systems are practical only if the runtime can explain when a combo window opened, which actors an AoE accepted, and when a periodic effect was applied, ticked, refreshed, or expired.
+Phase 7.5 adds grouped granting through ability sets. That workflow is only practical if the runtime can explain which set was processed, how many entries were granted, and which entries were skipped or rejected.
 
 ## What is available
 
-Phase 7 debugging includes:
+Phase 7.5 debugging includes:
 
 * structured `FMABSAbilityDebugEvent` output
 * the latest `FMABSTargetTraceDebugInfo` snapshot for target traces, hit traces, and melee sweeps
@@ -22,6 +22,14 @@ Phase 7 debugging includes:
 * `AMABSDebugHUD`
 
 ## Important event names
+
+Granting and grouped granting:
+
+* `AbilityGranted`
+* `AbilityGrantRejected`
+* `AbilitySetGranted`
+* `AbilitySetGrantSkipped`
+* `AbilitySetGrantFailed`
 
 Timing and combo events:
 
@@ -71,26 +79,19 @@ Read:
 * `GetActivePeriodicEffects()`
 * `LogMABSAbilitySystem`
 
-For Phase 7 problems, look for this order:
+For Phase 7.5 grouped grant problems, look for this order:
 
-1. combo window events if the ability should chain
-2. delivery and target resolution events
-3. `AoEResolved` and any `AoETargetRejected` events
-4. `EffectApplied` or `EffectApplicationFailed`
-5. periodic apply / refresh / tick / expire events when periodic data is enabled
+1. `AbilitySetGranted`, `AbilitySetGrantSkipped`, or `AbilitySetGrantFailed`
+2. any underlying `AbilityGranted` or `AbilityGrantRejected` entries
+3. activation, delivery, AoE, and periodic events after the grant succeeds
 
 ## Example
 
-Example burning combo slash flow:
+Example starting bundle flow:
 
-* `StartupStarted`
-* `ComboWindowStarted`
-* `DeliveryTriggered`
-* `MeleeHit`
-* `AoEResolved`
-* `EffectApplied`
-* `PeriodicEffectApplied`
-* `ComboQueued`
-* `ComboWindowEnded`
-* `RecoveryCompleted`
-* `PeriodicEffectTick`
+* `AbilityGranted`
+* `AbilityGranted`
+* `AbilitySetGrantSkipped`
+* `AbilitySetGranted`
+
+That means two valid abilities were granted, one null entry was skipped, and the set finished successfully overall.

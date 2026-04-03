@@ -10,6 +10,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "Data/MABSAbilityDefinition.h"
+#include "Data/MABSAbilitySet.h"
 #include "Debug/MABSAbilitySystemLogs.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
@@ -32,6 +33,9 @@ namespace MABSAbilityComponentEventNames
 	static const FName AbilityBlocked(TEXT("AbilityBlocked"));
 	static const FName AbilityGranted(TEXT("AbilityGranted"));
 	static const FName AbilityGrantRejected(TEXT("AbilityGrantRejected"));
+	static const FName AbilitySetGranted(TEXT("AbilitySetGranted"));
+	static const FName AbilitySetGrantFailed(TEXT("AbilitySetGrantFailed"));
+	static const FName AbilitySetGrantSkipped(TEXT("AbilitySetGrantSkipped"));
 	static const FName AbilityUnblocked(TEXT("AbilityUnblocked"));
 	static const FName CommitSucceeded(TEXT("CommitSucceeded"));
 	static const FName CooldownRejected(TEXT("CooldownRejected"));
@@ -305,6 +309,11 @@ namespace
 			: AbilityDefinition->DisplayName.ToString();
 	}
 
+	FString GetAbilitySetLabel(const UMABSAbilitySet* AbilitySet)
+	{
+		return AbilitySet != nullptr ? GetNameSafe(AbilitySet) : TEXT("InvalidAbilitySet");
+	}
+
 	FString FormatVectorForDebug(const FVector& Vector)
 	{
 		return FString::Printf(TEXT("(X=%.0f Y=%.0f Z=%.0f)"), Vector.X, Vector.Y, Vector.Z);
@@ -535,6 +544,131 @@ FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* A
 		FString::Printf(TEXT("Granted ability '%s'."), *GetAbilityLabel(AbilityDefinition)));
 
 	return AbilitySpec.Handle;
+}
+
+int32 UMABSAbilityComponent::GrantAbilitySet(UMABSAbilitySet* AbilitySet)
+{
+	const FMABSAbilityHandle InvalidHandle;
+
+	if (AbilitySet == nullptr)
+	{
+		EmitDebugEvent(
+			MABSAbilityComponentEventNames::AbilitySetGrantFailed,
+			FGameplayTag(),
+			InvalidHandle,
+			EMABSAbilityRuntimeState::None,
+			EMABSAbilityActivationResult::InvalidAbility,
+			TEXT("GrantAbilitySet rejected because the ability set asset was null."));
+		return 0;
+	}
+
+	if (!CanMutateAbilityState())
+	{
+		EmitDebugEvent(
+			MABSAbilityComponentEventNames::AbilitySetGrantFailed,
+			FGameplayTag(),
+			InvalidHandle,
+			EMABSAbilityRuntimeState::None,
+			EMABSAbilityActivationResult::AuthorityRejected,
+			FString::Printf(
+				TEXT("GrantAbilitySet must run on the authoritative owner for set '%s'."),
+				*GetAbilitySetLabel(AbilitySet)));
+		return 0;
+	}
+
+	int32 GrantedCount = 0;
+	int32 SkippedCount = 0;
+	int32 RejectedCount = 0;
+
+	for (UMABSAbilityDefinition* const AbilityDefinition : AbilitySet->AbilityDefinitions)
+	{
+		if (AbilityDefinition == nullptr)
+		{
+			++SkippedCount;
+			EmitDebugEvent(
+				MABSAbilityComponentEventNames::AbilitySetGrantSkipped,
+				FGameplayTag(),
+				InvalidHandle,
+				EMABSAbilityRuntimeState::None,
+				EMABSAbilityActivationResult::None,
+				FString::Printf(
+					TEXT("GrantAbilitySet skipped a null ability entry in set '%s'."),
+					*GetAbilitySetLabel(AbilitySet)));
+			continue;
+		}
+
+		if (GrantAbility(AbilityDefinition).IsValid())
+		{
+			++GrantedCount;
+			continue;
+		}
+
+		++RejectedCount;
+	}
+
+	const FName SummaryEventName = GrantedCount > 0
+		? MABSAbilityComponentEventNames::AbilitySetGranted
+		: (RejectedCount > 0
+			? MABSAbilityComponentEventNames::AbilitySetGrantFailed
+			: MABSAbilityComponentEventNames::AbilitySetGrantSkipped);
+	const EMABSAbilityActivationResult SummaryResult = GrantedCount > 0
+		? EMABSAbilityActivationResult::Success
+		: (RejectedCount > 0
+			? EMABSAbilityActivationResult::InvalidAbility
+			: EMABSAbilityActivationResult::None);
+
+	EmitDebugEvent(
+		SummaryEventName,
+		FGameplayTag(),
+		InvalidHandle,
+		EMABSAbilityRuntimeState::None,
+		SummaryResult,
+		FString::Printf(
+			TEXT("Processed ability set '%s': %d granted, %d skipped, %d rejected, %d total entries."),
+			*GetAbilitySetLabel(AbilitySet),
+			GrantedCount,
+			SkippedCount,
+			RejectedCount,
+			AbilitySet->AbilityDefinitions.Num()));
+
+	return GrantedCount;
+}
+
+int32 UMABSAbilityComponent::GrantAbilitySets(const TArray<UMABSAbilitySet*>& AbilitySets)
+{
+	const FMABSAbilityHandle InvalidHandle;
+
+	if (!CanMutateAbilityState())
+	{
+		EmitDebugEvent(
+			MABSAbilityComponentEventNames::AbilitySetGrantFailed,
+			FGameplayTag(),
+			InvalidHandle,
+			EMABSAbilityRuntimeState::None,
+			EMABSAbilityActivationResult::AuthorityRejected,
+			TEXT("GrantAbilitySets must run on the authoritative owner."));
+		return 0;
+	}
+
+	int32 TotalGrantedCount = 0;
+	for (UMABSAbilitySet* const AbilitySet : AbilitySets)
+	{
+		if (AbilitySet == nullptr)
+		{
+			EmitDebugEvent(
+				MABSAbilityComponentEventNames::AbilitySetGrantSkipped,
+				FGameplayTag(),
+				InvalidHandle,
+				EMABSAbilityRuntimeState::None,
+				EMABSAbilityActivationResult::None,
+				TEXT("GrantAbilitySets skipped a null ability set entry."));
+			continue;
+		}
+
+		TotalGrantedCount += GrantAbilitySet(AbilitySet);
+	}
+
+	return TotalGrantedCount;
 }
 
 bool UMABSAbilityComponent::SetAbilityBlockedByTag(FGameplayTag AbilityTag, const bool bBlocked)

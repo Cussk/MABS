@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document lists the current Phase 8 public surface for MABS.
+This document lists the current Phase 9 public surface for MABS.
 
-Phase 8 adds the read-model and query API used by the runtime debug harness while keeping gameplay execution in the existing component path.
+Phase 9 keeps the public API stable while cleaning the private implementation behind `UMABSAbilityComponent`.
 
 ## Module ownership
 
@@ -97,7 +97,7 @@ Granted runtime state still lives here:
 
 ### `FMABSAbilityDebugEvent`
 
-The structured event model now also includes:
+The structured event model includes:
 
 * `Category`
 
@@ -169,7 +169,7 @@ Harness-facing queries:
 
 ## Important `AMABSDebugHUD` API
 
-Phase 8 adds lightweight harness controls on the HUD:
+The runtime harness HUD exposes:
 
 * `SetOverlayEnabled(...)`
 * `ToggleOverlayEnabled()`
@@ -179,7 +179,7 @@ Phase 8 adds lightweight harness controls on the HUD:
 
 ## Important debug helpers
 
-`UMABSDebugBlueprintLibrary` now exposes harness-facing formatting helpers for:
+`UMABSDebugBlueprintLibrary` exposes harness-facing formatting helpers for:
 
 * compact event lines
 * granted ability summaries
@@ -187,3 +187,17 @@ Phase 8 adds lightweight harness controls on the HUD:
 * combo summaries
 * periodic summaries
 * category labels and colors
+
+## Phase 9 implementation note
+
+The public API above is still owned by `UMABSAbilityComponent`.
+
+Internally, the implementation is now split by concern into private component fragments for:
+
+* core state and replication
+* granting
+* activation and combo flow
+* delivery and targeting
+* effects, periodic runtime, cost, and cooldown
+* debug read-model assembly
+* presentation routing

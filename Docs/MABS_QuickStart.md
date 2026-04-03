@@ -2,7 +2,7 @@
 
 ## What it is
 
-This guide covers the current Phase 8 setup. MABS now supports:
+This guide covers the current Phase 9 setup. MABS now supports:
 
 * individual `UMABSAbilityDefinition` assets
 * grouped `UMABSAbilitySet` assets
@@ -10,7 +10,7 @@ This guide covers the current Phase 8 setup. MABS now supports:
 * authored startup, delivery, and recovery timing
 * optional combo, AoE, and periodic effect data
 * startup, delivery, tracer, projectile-travel, and impact presentation
-* the Phase 8 runtime debug harness
+* the runtime debug harness
 
 ## Why it exists
 
@@ -96,4 +96,10 @@ Example single authored projectile with harness inspection:
 
 Ability sets do not add a separate replication model.
 
-The server still grants the underlying abilities one by one through the existing authority path, granted runtime state still lives on `UMABSAbilityComponent`, and the Phase 8 harness reads that authoritative state back on the owning client.
+The server still grants the underlying abilities one by one through the existing authority path, granted runtime state still lives on `UMABSAbilityComponent`, and the harness reads that authoritative state back on the owning client.
+
+## Phase 9 note
+
+This setup flow is unchanged in Phase 9.
+
+The cleanup work is internal to `MABSGameplay`, so you still grant on authority and activate by tag through `UMABSAbilityComponent`.

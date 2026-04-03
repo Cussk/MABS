@@ -2,13 +2,13 @@
 
 ## What it is
 
-This document explains the Phase 8 runtime debugging model for MABS.
+This document explains the Phase 9 runtime debugging model for MABS.
 
-Phase 8 turns the old lightweight overlay into a real runtime harness that is useful during standalone, listen-server, and dedicated-server client testing.
+Phase 9 keeps the full runtime harness, but tightens the ownership split so gameplay only emits and exposes state while `MABSDebug` owns formatting and rendering.
 
 ## Why it exists
 
-By Phase 8, MABS already has enough runtime breadth that raw logs alone are not enough.
+By Phase 9, MABS already has enough runtime breadth that raw logs alone are not enough.
 
 Users need to inspect:
 
@@ -22,7 +22,7 @@ Users need to inspect:
 
 ## What is available
 
-Phase 8 debugging now includes:
+Phase 9 debugging includes:
 
 * structured `FMABSAbilityDebugEvent` output with `Category`
 * the latest `FMABSTargetTraceDebugInfo` snapshot
@@ -42,7 +42,7 @@ Phase 8 debugging now includes:
 
 ## Event categories
 
-Phase 8 keeps the existing event system, but each event now carries a lightweight category:
+Phase 9 keeps the existing event system, and each event carries a lightweight category:
 
 * `General`
 * `Activation`
@@ -96,6 +96,22 @@ That means:
 * the owning client receives recent debug events and target trace snapshots when debug replication is enabled
 * active periodic effect summaries are replicated owner-only for harness inspection
 * disabling the harness does not change gameplay behavior
+
+## Ownership note
+
+`UMABSAbilityComponent` owns:
+
+* event recording
+* target-trace snapshots
+* summary accessors
+* debug replication toggles
+
+`MABSDebug` owns:
+
+* compact formatting
+* category filtering
+* harness layout
+* HUD rendering
 
 ## Example
 

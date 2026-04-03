@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 8 module layout for MABS.
+This document explains the Phase 9 module layout for MABS.
 
-Phase 8 keeps the existing gameplay split, but moves the runtime debug harness more clearly into `MABSDebug` while `MABSGameplay` exposes small query helpers and summary read models.
+Phase 9 keeps the same runtime ownership, but cleans the internal gameplay implementation so `UMABSAbilityComponent` remains the API surface instead of a monolithic single-file implementation.
 
 ## Module map
 
@@ -66,14 +66,14 @@ Owns:
 * editor-only extensions
 * future validation and authoring helpers
 
-## Phase 8 ownership split
+## Phase 9 ownership split
 
-Phase 8 intentionally keeps responsibilities like this:
+Phase 9 intentionally keeps responsibilities like this:
 
-* `MABSGameplay` exposes data
+* `MABSGameplay` exposes and mutates runtime state
 * `MABSDebug` decides how that data is shown
 
-That means `UMABSAbilityComponent` now exposes compact query helpers such as:
+That means `UMABSAbilityComponent` still exposes compact query helpers such as:
 
 * `GetGrantedAbilityDebugSummaries()`
 * `GetCooldownGroupDebugSummaries()`
@@ -81,6 +81,20 @@ That means `UMABSAbilityComponent` now exposes compact query helpers such as:
 * `GetPeriodicEffectDebugSummaries()`
 
 The harness UI itself stays in `AMABSDebugHUD`.
+
+## `MABSGameplay` internal split
+
+Phase 9 keeps the public header stable, but moves the private implementation into focused files:
+
+* `MABSAbilityComponent_Core.inl`
+* `MABSAbilityComponent_Granting.inl`
+* `MABSAbilityComponent_Activation.inl`
+* `MABSAbilityComponent_Delivery.inl`
+* `MABSAbilityComponent_Effects.inl`
+* `MABSAbilityComponent_Debug.inl`
+* `MABSAbilityComponent_Presentation.inl`
+
+Those files are still part of the `MABSGameplay` runtime layer. They do not introduce new runtime state owners.
 
 ## Dependency direction
 

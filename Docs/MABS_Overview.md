@@ -4,7 +4,7 @@
 
 MABS is a plugin-first, multiplayer-ready, data-driven ability framework for Unreal Engine.
 
-As of Phase 8, the runtime path supports:
+As of Phase 9, the runtime path supports:
 
 * granting authored abilities
 * grouped granting through authored ability sets
@@ -21,7 +21,7 @@ As of Phase 8, the runtime path supports:
 * startup, delivery, tracer, projectile-travel, and impact presentation
 * lightweight runtime cue routing with small visibility policies
 * structured debug events
-* the Phase 8 runtime debug harness
+* the runtime debug harness
 
 ## Why it exists
 
@@ -40,7 +40,7 @@ MABS provides that foundation without pulling in a larger framework.
 ## Current module ownership
 
 * `MABSCore` owns authored data, ability-set data, ability runtime structs, and shared debug summary types
-* `MABSGameplay` owns granting, activation, delivery, effects, combo runtime, AoE resolution, periodic timers, cue routing, replication, projectile runtime, and debug summary accessors
+* `MABSGameplay` owns granting, activation, delivery, effects, combo runtime, AoE resolution, periodic timers, cue routing, replication, projectile runtime, and debug summary accessors through a cleaned `UMABSAbilityComponent` implementation split
 * `MABSDebug` owns runtime-safe formatting helpers and the runtime harness HUD
 * `MABSEditor` remains the editor-only extension point
 
@@ -69,3 +69,9 @@ MABS provides that foundation without pulling in a larger framework.
 8. Grant the ability or set on authority.
 9. Call `TryActivateAbilityByTag`.
 10. Optionally set the HUD class to `AMABSDebugHUD` and enable `mabs.DebugHarness 1` for runtime inspection.
+
+## Phase 9 cleanup note
+
+Phase 9 does not change the normal setup path.
+
+It changes the internal runtime organization so `UMABSAbilityComponent` stays the public authority surface while private implementation is separated by concern.

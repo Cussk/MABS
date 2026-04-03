@@ -1,3 +1,7 @@
+#include "Components/MABSAbilityRuntime_Internal.h"
+
+using namespace MABSAbilityRuntimeInternal;
+
 void UMABSAbilityComponent::MulticastPlayActivationMontage_Implementation(UAnimMontage* Montage, const float PlayRate)
 {
 	PlayActivationMontageLocally(Montage, PlayRate);

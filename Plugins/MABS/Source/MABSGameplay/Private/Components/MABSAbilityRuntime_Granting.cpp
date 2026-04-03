@@ -1,3 +1,7 @@
+#include "Components/MABSAbilityRuntime_Internal.h"
+
+using namespace MABSAbilityRuntimeInternal;
+
 FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* AbilityDefinition)
 {
 	const FMABSAbilityHandle InvalidHandle;

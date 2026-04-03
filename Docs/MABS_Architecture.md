@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 9 runtime architecture for MABS after the pre-v1 cleanup pass.
+This document explains the Phase 9.5 runtime architecture for MABS after the true de-monolith pass.
 
-The goal is to keep runtime behavior stable while making ownership and extension points easier to follow.
+The goal is to keep runtime behavior stable while giving each major runtime concern a clearer internal home.
 
 ## Module map
 
@@ -47,7 +47,7 @@ Owns:
 
 ## `UMABSAbilityComponent` ownership
 
-`UMABSAbilityComponent` is still the orchestration surface.
+`UMABSAbilityComponent` is still the public facade and authoritative state owner.
 
 It owns:
 
@@ -55,24 +55,94 @@ It owns:
 * authoritative runtime state
 * replication boundaries
 * activation entry points
-* timing and lifecycle coordination
-* debug event/query surfaces used by `MABSDebug`
+* lifecycle hooks
+* top-level orchestration between activation, delivery, effects, presentation, and debug state
 
-It does not own harness rendering or formatting rules.
+It does not own harness rendering or formatting rules, and it no longer relies on a `.inl` split as its primary internal structure.
 
-## Private implementation split
+## Internal runtime structure
 
-Phase 9 keeps the public header stable, but splits the private implementation into focused fragments:
+Phase 9.5 replaces the old fragment split with real private implementation units:
 
-* `MABSAbilityComponent_Core.inl`
-* `MABSAbilityComponent_Granting.inl`
-* `MABSAbilityComponent_Activation.inl`
-* `MABSAbilityComponent_Delivery.inl`
-* `MABSAbilityComponent_Effects.inl`
-* `MABSAbilityComponent_Debug.inl`
-* `MABSAbilityComponent_Presentation.inl`
+* `MABSAbilityComponent.cpp`
+* `MABSAbilityRuntime_Internal.h`
+* `MABSAbilityRuntime_Internal.cpp`
+* `MABSAbilityRuntime_Core.cpp`
+* `MABSAbilityRuntime_Granting.cpp`
+* `MABSAbilityRuntime_Activation.cpp`
+* `MABSAbilityRuntime_Delivery.cpp`
+* `MABSAbilityRuntime_Effects.cpp`
+* `MABSAbilityRuntime_Presentation.cpp`
+* `MABSAbilityRuntime_Debug.cpp`
 
-This keeps the component readable without adding new UObject layers or moving gameplay authority out of the component.
+That structure keeps the public component stable while making future runtime work easier to place.
+
+## Runtime concern boundaries
+
+### Core
+
+Owns:
+
+* replication setup
+* small runtime queries
+* debug replication toggles
+* local state lookup helpers
+
+### Granting
+
+Owns:
+
+* single ability grant flow
+* ability set grant flow
+* duplicate handling
+* grouped grant bookkeeping
+
+### Activation
+
+Owns:
+
+* activation validation
+* combo queue acceptance and rejection
+* startup scheduling
+* combo window open and close
+* recovery scheduling and completion
+
+### Delivery
+
+Owns:
+
+* direct, hit trace, melee, and projectile delivery
+* target resolution
+* delivery socket/origin resolution
+* AoE gather from impact context
+
+### Effects
+
+Owns:
+
+* instant effect application
+* periodic effect apply, tick, refresh, and expire
+* cooldown finalization
+* cost spend/finalization
+
+### Presentation
+
+Owns:
+
+* montage request helpers
+* cue transform resolution
+* cue routing
+* tracer routing
+* startup, delivery, impact, and projectile-travel presentation triggers
+
+### Debug runtime
+
+Owns:
+
+* debug event creation helpers
+* debug event categorization
+* target trace snapshot handling
+* summary read-model assembly
 
 ## Runtime state model
 
@@ -93,18 +163,18 @@ Primary transient runtime state:
 * `ActivePeriodicEffectRuntimes`
 * reusable cue and tracer Niagara pools
 
-That means the new fragments are organization helpers, not new state owners.
+That means the new runtime units separate behavior ownership, not state ownership.
 
 ## Runtime flow
 
 1. Authority grants one or more `UMABSAbilityDefinition` assets directly or through `UMABSAbilitySet`.
 2. Gameplay code calls `TryActivateAbilityByTag`.
-3. Authority validates grant, runtime state, cooldown, cost, and authored gameplay effect data.
-4. The activation path enters startup, schedules delivery, and optionally opens combo windows.
-5. Delivery resolves through `Direct`, `HitTrace`, `Melee`, or `Projectile`.
-6. AoE and gameplay effects expand from the resolved impact context when authored.
-7. Cooldowns, costs, recovery, and queued combo follow-ups are finalized.
-8. Debug events and summary read models are updated for owner-facing inspection.
+3. The activation runtime validates grant, runtime state, cooldown, cost, and authored gameplay effect data.
+4. Startup and recovery timing are coordinated by the activation runtime.
+5. The delivery runtime resolves direct, trace, melee, or projectile delivery.
+6. The effects runtime applies instant and periodic results and finalizes cost/cooldown state.
+7. The presentation runtime routes montage and cue work.
+8. The debug runtime records events and assembles summary read models for the harness.
 
 ## Debug read-model flow
 
@@ -118,24 +188,24 @@ The flow is:
 4. `UMABSDebugBlueprintLibrary` formats the read model for display.
 5. `AMABSDebugHUD` decides section layout, filtering, and presentation.
 
-## Extension points
+## How to extend it
 
 Extend MABS by touching the smallest owning layer:
 
 * new authored data fields belong in `MABSCore`
-* new delivery or effect behavior belongs in `MABSGameplay`
-* new debug formatting or harness layout belongs in `MABSDebug`
-* editor validation belongs in `MABSEditor`
+* new grant rules belong in granting runtime
+* new activation or combo behavior belongs in activation runtime
+* new delivery logic belongs in delivery runtime
+* new gameplay outcomes belong in effects runtime
+* new cue/montage work belongs in presentation runtime
+* new summaries belong in debug runtime
+* new harness rendering belongs in `MABSDebug`
 
-For component work, add logic to the matching private implementation fragment before adding new systems.
+## Example
 
-## What MABS is not trying to be
+Example future work placement:
 
-Phase 9 still does not turn MABS into:
-
-* a prediction-heavy ability framework
-* a deep stacking or buff graph system
-* a remote debugger
-* a GAS replacement clone
-
-The intent remains: a readable, multiplayer-ready, data-driven v1 ability framework.
+* a new trace variant belongs in `MABSAbilityRuntime_Delivery.cpp`
+* a new status-timer rule belongs in `MABSAbilityRuntime_Effects.cpp`
+* a new compact harness summary belongs in `MABSAbilityRuntime_Debug.cpp`
+* a new HUD section belongs in `MABSDebugHUD.cpp`

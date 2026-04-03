@@ -1,3 +1,7 @@
+#include "Components/MABSAbilityRuntime_Internal.h"
+
+using namespace MABSAbilityRuntimeInternal;
+
 EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffect(
 	const FMABSAbilitySpec& AbilitySpec,
 	AActor* TargetActor,

@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 9 module layout for MABS.
+This document explains the Phase 9.5 module layout for MABS.
 
-Phase 9 keeps the same runtime ownership, but cleans the internal gameplay implementation so `UMABSAbilityComponent` remains the API surface instead of a monolithic single-file implementation.
+Phase 9.5 keeps the module ownership from earlier phases, but replaces the old `.inl`-based component decomposition with real private runtime implementation units inside `MABSGameplay`.
 
 ## Module map
 
@@ -34,20 +34,13 @@ Owns:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
-* single-ability granting
-* grouped set granting
-* timer-based startup, delivery, recovery, combo, and periodic scheduling
-* authority-side combo queueing
-* authority-side AoE resolution
-* authority-side instant and periodic effect application
-* periodic reapply refresh behavior
-* socket transform resolution
-* montage request hooks
-* authority-side delivery execution
-* cue routing helpers for startup, delivery, tracer, travel, and impact
-* cooldown and cost integration
+* granting runtime
+* activation and combo runtime
+* delivery and targeting runtime
+* effects, cooldown, cost, and periodic runtime
+* presentation routing runtime
+* debug summary and event assembly runtime
 * replicated gameplay state
-* debug summary query helpers and owner-facing debug state accessors
 
 ### `MABSDebug`
 
@@ -66,12 +59,28 @@ Owns:
 * editor-only extensions
 * future validation and authoring helpers
 
-## Phase 9 ownership split
+## `MABSGameplay` internal split
 
-Phase 9 intentionally keeps responsibilities like this:
+Phase 9.5 keeps `UMABSAbilityComponent` as the public facade, but the private runtime now lives in:
 
-* `MABSGameplay` exposes and mutates runtime state
-* `MABSDebug` decides how that data is shown
+* `MABSAbilityRuntime_Internal.h`
+* `MABSAbilityRuntime_Internal.cpp`
+* `MABSAbilityRuntime_Core.cpp`
+* `MABSAbilityRuntime_Granting.cpp`
+* `MABSAbilityRuntime_Activation.cpp`
+* `MABSAbilityRuntime_Delivery.cpp`
+* `MABSAbilityRuntime_Effects.cpp`
+* `MABSAbilityRuntime_Presentation.cpp`
+* `MABSAbilityRuntime_Debug.cpp`
+
+That is now the primary refactor story, not a large component source file with included fragments.
+
+## Ownership split
+
+Phase 9.5 intentionally keeps responsibilities like this:
+
+* `MABSGameplay` owns gameplay truth and runtime read models
+* `MABSDebug` decides how that runtime data is displayed
 
 That means `UMABSAbilityComponent` still exposes compact query helpers such as:
 
@@ -81,20 +90,6 @@ That means `UMABSAbilityComponent` still exposes compact query helpers such as:
 * `GetPeriodicEffectDebugSummaries()`
 
 The harness UI itself stays in `AMABSDebugHUD`.
-
-## `MABSGameplay` internal split
-
-Phase 9 keeps the public header stable, but moves the private implementation into focused files:
-
-* `MABSAbilityComponent_Core.inl`
-* `MABSAbilityComponent_Granting.inl`
-* `MABSAbilityComponent_Activation.inl`
-* `MABSAbilityComponent_Delivery.inl`
-* `MABSAbilityComponent_Effects.inl`
-* `MABSAbilityComponent_Debug.inl`
-* `MABSAbilityComponent_Presentation.inl`
-
-Those files are still part of the `MABSGameplay` runtime layer. They do not introduce new runtime state owners.
 
 ## Dependency direction
 

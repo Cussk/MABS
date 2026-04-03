@@ -2,13 +2,13 @@
 
 ## What it is
 
-The MABS debug harness is the Phase 9 runtime inspection panel built around `AMABSDebugHUD`.
+The MABS debug harness is the Phase 9.5 runtime inspection panel built around `AMABSDebugHUD`.
 
 It is a gameplay-facing inspection tool, not an Unreal profiling replacement.
 
 ## Why it exists
 
-By Phase 9, MABS now includes:
+By Phase 9.5, MABS now includes:
 
 * grouped granting
 * timing
@@ -45,9 +45,9 @@ The harness currently shows:
 * formatting
 * event filtering
 
-`MABSGameplay` owns the query helpers that feed it.
+`MABSGameplay` owns the query helpers and debug runtime data that feed it.
 
-Phase 9 keeps that split, but the gameplay-side query and event work now lives in the private debug fragment of `UMABSAbilityComponent` instead of being mixed through unrelated execution sections.
+Phase 9.5 keeps display concerns in `MABSDebug`, while debug read-model assembly now lives in `MABSAbilityRuntime_Debug.cpp`.
 
 ## What state it uses
 

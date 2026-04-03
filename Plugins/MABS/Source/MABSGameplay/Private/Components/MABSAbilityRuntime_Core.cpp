@@ -1,3 +1,7 @@
+#include "Components/MABSAbilityRuntime_Internal.h"
+
+using namespace MABSAbilityRuntimeInternal;
+
 void UMABSAbilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);

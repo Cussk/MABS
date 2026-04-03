@@ -1,3 +1,7 @@
+#include "Components/MABSAbilityRuntime_Internal.h"
+
+using namespace MABSAbilityRuntimeInternal;
+
 EMABSAbilityActivationResult UMABSAbilityComponent::TryActivateAbilityByTag(const FGameplayTag AbilityTag)
 {
 	const FMABSAbilityHandle InvalidHandle;

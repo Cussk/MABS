@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document lists the current Phase 9 public surface for MABS.
+This document lists the current Phase 9.5 public surface for MABS.
 
-Phase 9 keeps the public API stable while cleaning the private implementation behind `UMABSAbilityComponent`.
+Phase 9.5 keeps the public API stable while replacing the old internal `.inl` split with real runtime implementation units.
 
 ## Module ownership
 
@@ -188,11 +188,11 @@ The runtime harness HUD exposes:
 * periodic summaries
 * category labels and colors
 
-## Phase 9 implementation note
+## Phase 9.5 implementation note
 
 The public API above is still owned by `UMABSAbilityComponent`.
 
-Internally, the implementation is now split by concern into private component fragments for:
+Internally, the implementation now lives in real runtime units for:
 
 * core state and replication
 * granting

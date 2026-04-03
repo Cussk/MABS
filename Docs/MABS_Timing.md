@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the Phase 5 timing model for ability execution.
+This document explains the Phase 6 timing model for ability execution and presentation.
 
 ## Why it exists
 
-Phase 4 delivery worked, but everything still felt immediate. Phase 5 adds explicit timing windows so abilities can line up with authored combat pacing.
+Earlier delivery worked, but everything still felt immediate. Phase 5 added explicit timing windows so abilities could line up with authored combat pacing. Phase 6 now attaches presentation to those same timing windows.
 
 ## Authored fields
 
@@ -23,10 +23,13 @@ Phase 4 delivery worked, but everything still felt immediate. Phase 5 adds expli
 When activation is accepted on authority:
 
 1. the granted spec enters `Startup`
+2. startup presentation triggers if authored
 2. delivery is scheduled using the authored delivery delay
 3. delivery executes when that timer fires
-4. successful delivery enters `Recovery`
-5. recovery returns the granted spec to `Idle`
+4. delivery presentation triggers at that same moment
+5. successful delivery may later trigger impact presentation after the gameplay result succeeds
+6. successful delivery enters `Recovery`
+7. recovery returns the granted spec to `Idle`
 
 `DeliveryTime` is treated as time since activation start.
 `RecoveryDuration` is also treated as time since activation start, but it marks when the full ability should be done.

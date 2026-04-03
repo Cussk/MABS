@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "Types/MABSPresentationTypes.h"
 #include "Types/MABSAbilityTypes.h"
 #include "MABSAbilityDefinition.generated.h"
 
@@ -47,6 +48,15 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Timing", meta=(ClampMin="0.0"))
 	float RecoveryDuration = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation|Startup")
+	FMABSPresentationStartupData StartupPresentation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation|Delivery")
+	FMABSPresentationDeliveryData DeliveryPresentation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation|Impact")
+	FMABSPresentationImpactData ImpactPresentation;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))
 	float TargetTraceDistance = 1500.0f;

@@ -7,6 +7,8 @@
 #include "Data/MABSAbilityDefinition.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Net/UnrealNetwork.h"
 
 AMABSProjectileBase::AMABSProjectileBase()
 {
@@ -42,6 +44,23 @@ AMABSProjectileBase::AMABSProjectileBase()
 	InitialLifeSpan = 5.0f;
 }
 
+void AMABSProjectileBase::BeginPlay()
+{
+	Super::BeginPlay();
+
+	ActivateTravelPresentation();
+}
+
+void AMABSProjectileBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AMABSProjectileBase, SourceActor);
+	DOREPLIFETIME(AMABSProjectileBase, SourceAbilityDefinition);
+	DOREPLIFETIME(AMABSProjectileBase, SourceAbilityTag);
+	DOREPLIFETIME(AMABSProjectileBase, SourceAbilityHandle);
+}
+
 void AMABSProjectileBase::InitializeProjectile(
 	UMABSAbilityComponent* InOwningAbilityComponent,
 	AActor* InSourceActor,
@@ -74,6 +93,11 @@ void AMABSProjectileBase::InitializeProjectile(
 	{
 		SetInstigator(InSourceActor->GetInstigator());
 	}
+}
+
+void AMABSProjectileBase::OnRep_SourceAbilityDefinition()
+{
+	ActivateTravelPresentation();
 }
 
 USphereComponent* AMABSProjectileBase::GetCollisionComponent() const
@@ -167,4 +191,37 @@ UMABSAbilityComponent* AMABSProjectileBase::ResolveOwningAbilityComponent() cons
 	}
 
 	return SourceActor != nullptr ? SourceActor->FindComponentByClass<UMABSAbilityComponent>() : nullptr;
+}
+
+void AMABSProjectileBase::ActivateTravelPresentation()
+{
+	if (bTravelPresentationActivated || SourceAbilityDefinition == nullptr)
+	{
+		return;
+	}
+
+	bTravelPresentationActivated = true;
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (RootComponent == nullptr)
+	{
+		return;
+	}
+
+	if (SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX != nullptr)
+	{
+		UGameplayStatics::SpawnEmitterAttached(
+			SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX,
+			RootComponent);
+	}
+
+	if (SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX != nullptr)
+	{
+		UGameplayStatics::SpawnSoundAttached(
+			SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX,
+			RootComponent);
+	}
 }

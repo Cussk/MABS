@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the Phase 5 socket-first origin model.
+This document explains the Phase 6 socket-first origin model for both gameplay delivery and presentation.
 
 ## Why it exists
 
-Raw offsets alone are too weak for real combat authoring. Socket-first origins let traces, sweeps, and projectile spawns line up with weapons, hands, or mesh attachment points.
+Raw offsets alone are too weak for real combat authoring. Socket-first origins let traces, sweeps, projectile spawns, and presentation cues line up with weapons, hands, or mesh attachment points.
 
 ## Authored fields
 
@@ -26,6 +26,12 @@ Optional offsets remain available:
 * `MeleeOriginOffset`
 * `ProjectileSpawnOffset`
 
+Presentation cues also support:
+
+* `SocketName`
+* `LocationOffset`
+* `RotationOffset`
+
 ## Resolution order
 
 For hit trace, melee, and projectile delivery, MABS resolves origins in this order:
@@ -41,12 +47,20 @@ Fallback behavior:
 
 Offsets are applied after the socket or fallback transform is resolved.
 
+For startup and delivery presentation, MABS resolves origins in this order:
+
+1. the presentation cue socket override
+2. the delivery-mode socket
+3. `DeliveryOriginSocketName`
+4. a safe fallback transform
+
 ## Debug visibility
 
 MABS emits:
 
 * `SocketResolved`
 * `SocketFallbackUsed`
+* `PresentationSocketFallbackUsed`
 
 This makes it clear whether the authored socket was found or a fallback path was used.
 
@@ -64,6 +78,7 @@ Example fireball:
 
 * `DeliveryMode = Projectile`
 * `ProjectileSpawnSocketName = hand_r`
+* `DeliveryPresentation.Cue.SocketName = hand_r`
 
 If those sockets are missing, MABS falls back safely and emits a readable debug event.
 

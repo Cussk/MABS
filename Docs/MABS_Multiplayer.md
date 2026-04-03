@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains how Phase 4 handles multiplayer authority for activation, delivery, projectile runtime, costs, cooldowns, and debug visibility.
+This document explains how Phase 6 handles multiplayer authority for activation, delivery, projectile runtime, costs, cooldowns, presentation, and debug visibility.
 
 ## Why it exists
 
-Delivery is easy to get wrong if clients can decide hits, sweeps, or projectile impact. MABS keeps those decisions on the server while still mirroring readable results back to the owning client.
+Delivery and presentation are easy to get wrong if clients can decide hits, sweeps, projectile impact, or cosmetic timing. MABS keeps gameplay decisions on the server while routing relevant cosmetic results out to clients in a controlled way.
 
 ## Server authority
 
@@ -20,6 +20,7 @@ The server owns:
 * projectile spawn
 * projectile impact
 * damage and heal application
+* presentation timing decisions
 
 ## Client behavior
 
@@ -31,16 +32,17 @@ When a remote client calls `TryActivateAbilityByTag`:
 4. authority validates and executes the authored delivery mode
 5. the owning client receives the authoritative debug events
 
-## Projectile behavior in multiplayer
+## Presentation behavior in multiplayer
 
-Projectile delivery uses a simple spawn-success model:
+Presentation is cosmetic, but Phase 6 still routes it from authority:
 
-* authority spawns the projectile
-* successful spawn commits the ability
-* cost is spent and cooldown starts on successful spawn
-* later impact applies the authored instant effect on authority
+* startup presentation starts when authority enters startup
+* delivery presentation starts when authority reaches the authored delivery time
+* hit-trace tracer presentation uses the authoritative trace path
+* projectile travel presentation runs from the replicated projectile actor
+* impact presentation starts after the authoritative gameplay result succeeds
 
-Clients do not authoritatively decide projectile results.
+Clients do not authoritatively decide gameplay results.
 
 ## Runtime overlay
 

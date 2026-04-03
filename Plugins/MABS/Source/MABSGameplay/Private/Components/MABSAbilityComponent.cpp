@@ -4,6 +4,7 @@
 #include "Actors/MABSProjectileBase.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Camera/CameraShakeBase.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -20,6 +21,9 @@
 #include "Interfaces/MABSInstantEffectReceiver.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "Particles/ParticleSystem.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
 namespace MABSAbilityComponentEventNames
@@ -44,8 +48,11 @@ namespace MABSAbilityComponentEventNames
 	static const FName MeleeRejected(TEXT("MeleeRejected"));
 	static const FName MontagePlayFailed(TEXT("MontagePlayFailed"));
 	static const FName MontagePlayRequested(TEXT("MontagePlayRequested"));
+	static const FName PresentationAssetMissing(TEXT("PresentationAssetMissing"));
+	static const FName PresentationSocketFallbackUsed(TEXT("PresentationSocketFallbackUsed"));
 	static const FName ProjectileImpact(TEXT("ProjectileImpact"));
 	static const FName ProjectileImpactRejected(TEXT("ProjectileImpactRejected"));
+	static const FName ProjectileTravelPresentationTriggered(TEXT("ProjectileTravelPresentationTriggered"));
 	static const FName ProjectileSpawned(TEXT("ProjectileSpawned"));
 	static const FName ProjectileSpawnFailed(TEXT("ProjectileSpawnFailed"));
 	static const FName RecoveryCompleted(TEXT("RecoveryCompleted"));
@@ -57,6 +64,7 @@ namespace MABSAbilityComponentEventNames
 	static const FName SocketFallbackUsed(TEXT("SocketFallbackUsed"));
 	static const FName SocketResolved(TEXT("SocketResolved"));
 	static const FName StartupStarted(TEXT("StartupStarted"));
+	static const FName StartupPresentationTriggered(TEXT("StartupPresentationTriggered"));
 	static const FName TargetTraceHit(TEXT("TargetTraceHit"));
 	static const FName TargetTraceRejected(TEXT("TargetTraceRejected"));
 	static const FName TargetTraceStarted(TEXT("TargetTraceStarted"));
@@ -64,6 +72,10 @@ namespace MABSAbilityComponentEventNames
 	static const FName TargetResolutionFailed(TEXT("TargetResolutionFailed"));
 	static const FName DeliveryScheduled(TEXT("DeliveryScheduled"));
 	static const FName DeliveryTriggered(TEXT("DeliveryTriggered"));
+	static const FName DeliveryPresentationTriggered(TEXT("DeliveryPresentationTriggered"));
+	static const FName ImpactPresentationTriggered(TEXT("ImpactPresentationTriggered"));
+	static const FName TracerSpawned(TEXT("TracerSpawned"));
+	static const FName TracerSpawnFailed(TEXT("TracerSpawnFailed"));
 }
 
 namespace
@@ -214,6 +226,40 @@ namespace
 	FString GetHitActorLabel(const AActor* Actor)
 	{
 		return Actor != nullptr ? GetNameSafe(Actor) : TEXT("World");
+	}
+
+	FString DescribeCueAssets(const FMABSPresentationCueData& CueData)
+	{
+		TArray<FString> AssetLabels;
+		if (CueData.VFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(CueData.VFX)));
+		}
+		if (CueData.SFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(CueData.SFX)));
+		}
+		if (CueData.CameraShake.HasCameraShake())
+		{
+			AssetLabels.Add(FString::Printf(TEXT("CameraShake=%s"), *GetNameSafe(CueData.CameraShake.CameraShakeClass)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no presentation assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+
+	FString DescribeTracerAssets(const FMABSHitTraceTracerPresentationData& TracerData)
+	{
+		TArray<FString> AssetLabels;
+		if (TracerData.TracerVFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(TracerData.TracerVFX)));
+		}
+		if (TracerData.TracerSFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(TracerData.TracerSFX)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no tracer assets") : FString::Join(AssetLabels, TEXT(", "));
 	}
 
 	FName GetActivationFailureEventName(const EMABSAbilityActivationResult ActivationResult)
@@ -534,6 +580,17 @@ void UMABSAbilityComponent::ClientReceiveTargetTraceDebugInfo_Implementation(con
 void UMABSAbilityComponent::MulticastPlayActivationMontage_Implementation(UAnimMontage* Montage, const float PlayRate)
 {
 	PlayActivationMontageLocally(Montage, PlayRate);
+}
+
+void UMABSAbilityComponent::MulticastPlayPresentationCue_Implementation(const FMABSPresentationCueRuntimeData& CueData)
+{
+	PlayPresentationCueLocally(CueData);
+}
+
+void UMABSAbilityComponent::MulticastSpawnTracerPresentation_Implementation(
+	const FMABSTracerPresentationRuntimeData& TracerData)
+{
+	SpawnTracerPresentationLocally(TracerData);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(const FGameplayTag& AbilityTag, const bool bNotifyOwningClient)
@@ -871,6 +928,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::BeginAbilityStartup(FMABSAbi
 		EmitDebugEventToOwningClient(StartupStartedEvent);
 	}
 
+	TriggerStartupPresentation(AbilitySpec, bNotifyOwningClient);
 	RequestAbilityMontagePlayback(AbilitySpec, bNotifyOwningClient);
 
 	const FMABSAbilityDebugEvent DeliveryScheduledEvent = EmitDebugEvent(
@@ -1123,8 +1181,11 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 	case EMABSDeliveryMode::Direct:
 		{
 			FString DeliveryDebugMessage;
-			AActor* const TargetActor = ExecuteDirectDelivery(AbilitySpec, DeliveryDebugMessage, bNotifyOwningClient);
-			if (TargetActor == nullptr)
+			const FMABSResolvedAbilityTarget ResolvedTarget = ExecuteDirectDelivery(
+				AbilitySpec,
+				DeliveryDebugMessage,
+				bNotifyOwningClient);
+			if (ResolvedTarget.TargetActor == nullptr)
 			{
 				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::TargetResolutionFailed;
@@ -1157,14 +1218,17 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 				EmitDebugEventToOwningClient(TargetResolvedEvent);
 			}
 
-			return CompleteResolvedTargetAbility(AbilitySpec, TargetActor, DeliveryMode, bNotifyOwningClient);
+			return CompleteResolvedTargetAbility(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
 		}
 
 	case EMABSDeliveryMode::HitTrace:
 		{
 			FString DeliveryDebugMessage;
-			AActor* const TargetActor = ExecuteHitTraceDelivery(AbilitySpec, DeliveryDebugMessage, bNotifyOwningClient);
-			if (TargetActor == nullptr)
+			const FMABSResolvedAbilityTarget ResolvedTarget = ExecuteHitTraceDelivery(
+				AbilitySpec,
+				DeliveryDebugMessage,
+				bNotifyOwningClient);
+			if (ResolvedTarget.TargetActor == nullptr)
 			{
 				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
@@ -1185,14 +1249,17 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 				return EMABSAbilityActivationResult::DeliveryFailed;
 			}
 
-			return CompleteResolvedTargetAbility(AbilitySpec, TargetActor, DeliveryMode, bNotifyOwningClient);
+			return CompleteResolvedTargetAbility(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
 		}
 
 	case EMABSDeliveryMode::Melee:
 		{
 			FString DeliveryDebugMessage;
-			AActor* const TargetActor = ExecuteMeleeDelivery(AbilitySpec, DeliveryDebugMessage, bNotifyOwningClient);
-			if (TargetActor == nullptr)
+			const FMABSResolvedAbilityTarget ResolvedTarget = ExecuteMeleeDelivery(
+				AbilitySpec,
+				DeliveryDebugMessage,
+				bNotifyOwningClient);
+			if (ResolvedTarget.TargetActor == nullptr)
 			{
 				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
@@ -1213,7 +1280,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 				return EMABSAbilityActivationResult::DeliveryFailed;
 			}
 
-			return CompleteResolvedTargetAbility(AbilitySpec, TargetActor, DeliveryMode, bNotifyOwningClient);
+			return CompleteResolvedTargetAbility(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
 		}
 
 	case EMABSDeliveryMode::Projectile:
@@ -1240,24 +1307,38 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 	}
 }
 
-AActor* UMABSAbilityComponent::ExecuteDirectDelivery(
+FMABSResolvedAbilityTarget UMABSAbilityComponent::ExecuteDirectDelivery(
 	const FMABSAbilitySpec& AbilitySpec,
 	FString& OutDebugMessage,
 	const bool bNotifyOwningClient)
 {
-	return ResolveAbilityTarget(AbilitySpec, OutDebugMessage, bNotifyOwningClient);
+	FMABSResolvedAbilityTarget ResolvedTarget;
+	TriggerDeliveryPresentation(AbilitySpec, EMABSDeliveryMode::Direct, bNotifyOwningClient);
+	ResolvedTarget.TargetActor = ResolveAbilityTarget(AbilitySpec, OutDebugMessage, bNotifyOwningClient);
+	if (ResolvedTarget.TargetActor != nullptr)
+	{
+		ResolvedTarget.ImpactHitResult.Location = ResolvedTarget.TargetActor->GetActorLocation();
+		ResolvedTarget.ImpactHitResult.ImpactPoint = ResolvedTarget.TargetActor->GetActorLocation();
+		ResolvedTarget.ImpactHitResult.ImpactNormal = GetOwner() != nullptr
+			? -GetOwner()->GetActorForwardVector()
+			: FVector::UpVector;
+		ResolvedTarget.bHasImpactHitResult = true;
+	}
+
+	return ResolvedTarget;
 }
 
-AActor* UMABSAbilityComponent::ExecuteHitTraceDelivery(
+FMABSResolvedAbilityTarget UMABSAbilityComponent::ExecuteHitTraceDelivery(
 	const FMABSAbilitySpec& AbilitySpec,
 	FString& OutDebugMessage,
 	const bool bNotifyOwningClient)
 {
+	FMABSResolvedAbilityTarget ResolvedTarget;
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
 	if (AbilityDefinition == nullptr)
 	{
 		OutDebugMessage = TEXT("HitTrace delivery failed because the ability definition was invalid.");
-		return nullptr;
+		return ResolvedTarget;
 	}
 
 	FTransform OriginTransform = FTransform::Identity;
@@ -1270,8 +1351,10 @@ AActor* UMABSAbilityComponent::ExecuteHitTraceDelivery(
 		bNotifyOwningClient))
 	{
 		OutDebugMessage = TEXT("HitTrace delivery failed because no valid delivery origin could be resolved.");
-		return nullptr;
+		return ResolvedTarget;
 	}
+
+	TriggerDeliveryPresentation(AbilitySpec, EMABSDeliveryMode::HitTrace, bNotifyOwningClient);
 
 	FVector AimTraceStart = FVector::ZeroVector;
 	FRotator TraceRotation = OriginTransform.GetRotation().Rotator();
@@ -1287,7 +1370,8 @@ AActor* UMABSAbilityComponent::ExecuteHitTraceDelivery(
 
 	const FVector TraceStart = OriginTransform.GetLocation();
 	const FVector TraceEnd = TraceStart + (TraceRotation.Vector() * AbilityDefinition->HitTraceDistance);
-	return ResolveActorTargetFromTrace(
+	FVector TracerEndPoint = TraceEnd;
+	ResolvedTarget.TargetActor = ResolveActorTargetFromTrace(
 		AbilitySpec,
 		TraceStart,
 		TraceEnd,
@@ -1301,19 +1385,25 @@ AActor* UMABSAbilityComponent::ExecuteHitTraceDelivery(
 		MABSAbilityComponentEventNames::HitTraceHit,
 		MABSAbilityComponentEventNames::HitTraceRejected,
 		OutDebugMessage,
+		&ResolvedTarget.ImpactHitResult,
+		&TracerEndPoint,
 		bNotifyOwningClient);
+	ResolvedTarget.bHasImpactHitResult = ResolvedTarget.TargetActor != nullptr;
+	TriggerTracerPresentation(AbilitySpec, TraceStart, TracerEndPoint, bNotifyOwningClient);
+	return ResolvedTarget;
 }
 
-AActor* UMABSAbilityComponent::ExecuteMeleeDelivery(
+FMABSResolvedAbilityTarget UMABSAbilityComponent::ExecuteMeleeDelivery(
 	const FMABSAbilitySpec& AbilitySpec,
 	FString& OutDebugMessage,
 	const bool bNotifyOwningClient)
 {
+	FMABSResolvedAbilityTarget ResolvedTarget;
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
 	if (AbilityDefinition == nullptr)
 	{
 		OutDebugMessage = TEXT("Melee delivery failed because the ability definition was invalid.");
-		return nullptr;
+		return ResolvedTarget;
 	}
 
 	FTransform OriginTransform = FTransform::Identity;
@@ -1326,13 +1416,16 @@ AActor* UMABSAbilityComponent::ExecuteMeleeDelivery(
 		bNotifyOwningClient))
 	{
 		OutDebugMessage = TEXT("Melee delivery failed because no valid delivery origin could be resolved.");
-		return nullptr;
+		return ResolvedTarget;
 	}
+
+	TriggerDeliveryPresentation(AbilitySpec, EMABSDeliveryMode::Melee, bNotifyOwningClient);
 
 	const FVector ForwardVector = ResolveMeleeTraceDirection();
 	const FVector TraceStart = OriginTransform.GetLocation() + (ForwardVector * AbilityDefinition->MeleeForwardOffset);
 	const FVector TraceEnd = TraceStart + (ForwardVector * AbilityDefinition->MeleeRange);
-	return ResolveActorTargetFromTrace(
+	FVector UnusedTraceEndPoint = TraceEnd;
+	ResolvedTarget.TargetActor = ResolveActorTargetFromTrace(
 		AbilitySpec,
 		TraceStart,
 		TraceEnd,
@@ -1346,7 +1439,11 @@ AActor* UMABSAbilityComponent::ExecuteMeleeDelivery(
 		MABSAbilityComponentEventNames::MeleeHit,
 		MABSAbilityComponentEventNames::MeleeRejected,
 		OutDebugMessage,
+		&ResolvedTarget.ImpactHitResult,
+		&UnusedTraceEndPoint,
 		bNotifyOwningClient);
+	ResolvedTarget.bHasImpactHitResult = ResolvedTarget.TargetActor != nullptr;
+	return ResolvedTarget;
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
@@ -1423,6 +1520,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 		return EMABSAbilityActivationResult::DeliveryFailed;
 	}
 
+	TriggerDeliveryPresentation(AbilitySpec, EMABSDeliveryMode::Projectile, bNotifyOwningClient);
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
 
 	AMABSProjectileBase* Projectile = World->SpawnActorDeferred<AMABSProjectileBase>(
@@ -1487,19 +1585,41 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 		EmitDebugEventToOwningClient(ProjectileSpawnedEvent);
 	}
 
+	if (AbilityDefinition->DeliveryPresentation.ProjectileTravel.HasAnyPresentation())
+	{
+		const FMABSAbilityDebugEvent TravelPresentationEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ProjectileTravelPresentationTriggered,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			FString::Printf(
+				TEXT("Hooked projectile travel presentation for projectile '%s'. Assets: VFX=%s, SFX=%s."),
+				*GetNameSafe(Projectile),
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX),
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX)));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(TravelPresentationEvent);
+		}
+	}
+
 	return FinalizeAbilityCommit(AbilitySpec, EMABSDeliveryMode::Projectile, bNotifyOwningClient);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::CompleteResolvedTargetAbility(
 	FMABSAbilitySpec& AbilitySpec,
-	AActor* TargetActor,
+	const FMABSResolvedAbilityTarget& ResolvedTarget,
 	const EMABSDeliveryMode DeliveryMode,
 	const bool bNotifyOwningClient)
 {
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
 
 	FString EffectDebugMessage;
-	const EMABSAbilityActivationResult EffectResult = ApplyInstantEffect(AbilitySpec, TargetActor, EffectDebugMessage);
+	const EMABSAbilityActivationResult EffectResult = ApplyInstantEffect(
+		AbilitySpec,
+		ResolvedTarget.TargetActor,
+		EffectDebugMessage);
 	if (EffectResult != EMABSAbilityActivationResult::Success)
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
@@ -1533,6 +1653,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CompleteResolvedTargetAbilit
 		EmitDebugEventToOwningClient(EffectAppliedEvent);
 	}
 
+	TriggerImpactPresentation(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
 	return FinalizeAbilityCommit(AbilitySpec, DeliveryMode, bNotifyOwningClient);
 }
 
@@ -1654,6 +1775,8 @@ AActor* UMABSAbilityComponent::ResolveAbilityTarget(
 				MABSAbilityComponentEventNames::TargetTraceHit,
 				MABSAbilityComponentEventNames::TargetTraceRejected,
 				OutDebugMessage,
+				nullptr,
+				nullptr,
 				bNotifyOwningClient);
 
 			if (ResolvedActor != nullptr)
@@ -1690,8 +1813,20 @@ AActor* UMABSAbilityComponent::ResolveActorTargetFromTrace(
 	const FName TraceHitEventName,
 	const FName TraceRejectedEventName,
 	FString& OutDebugMessage,
+	FHitResult* OutAcceptedHitResult,
+	FVector* OutTraceEndPoint,
 	const bool bNotifyOwningClient)
 {
+	if (OutAcceptedHitResult != nullptr)
+	{
+		*OutAcceptedHitResult = FHitResult();
+	}
+
+	if (OutTraceEndPoint != nullptr)
+	{
+		*OutTraceEndPoint = TraceEnd;
+	}
+
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
 	AActor* const Owner = GetOwner();
 	UWorld* const World = GetWorld();
@@ -1787,6 +1922,11 @@ AActor* UMABSAbilityComponent::ResolveActorTargetFromTrace(
 	for (const FHitResult& HitResult : HitResults)
 	{
 		AActor* const HitActor = HitResult.GetActor();
+		if (OutTraceEndPoint != nullptr)
+		{
+			*OutTraceEndPoint = HitResult.ImpactPoint;
+		}
+
 		TraceDebugInfo.bHit = true;
 		TraceDebugInfo.HitLocation = HitResult.ImpactPoint;
 		TraceDebugInfo.HitDistance = FVector::Distance(TraceStart, HitResult.ImpactPoint);
@@ -1898,6 +2038,11 @@ AActor* UMABSAbilityComponent::ResolveActorTargetFromTrace(
 		if (bNotifyOwningClient)
 		{
 			EmitLatestTargetTraceDebugInfoToOwningClient(TraceDebugInfo);
+		}
+
+		if (OutAcceptedHitResult != nullptr)
+		{
+			*OutAcceptedHitResult = HitResult;
 		}
 		DrawTargetTraceDebug(*AbilityDefinition, TraceDebugInfo);
 		OutDebugMessage = TraceDebugInfo.ResultMessage;
@@ -2062,6 +2207,13 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleProjectileImpact(
 		EMABSAbilityActivationResult::Success,
 		ImpactDebugMessage);
 	EmitDebugEventToOwningClient(EffectAppliedEvent);
+
+	TriggerProjectileImpactPresentation(
+		*AbilityDefinition,
+		Projectile.GetSourceAbilityTag(),
+		Projectile.GetSourceAbilityHandle(),
+		HitResult,
+		HitActor);
 
 	const FMABSAbilityDebugEvent ProjectileImpactEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::ProjectileImpact,
@@ -2841,6 +2993,454 @@ bool UMABSAbilityComponent::GetProjectileSpawnTransform(
 		*OriginDescription,
 		*AimDescription);
 	return true;
+}
+
+bool UMABSAbilityComponent::ResolvePresentationTransform(
+	const UMABSAbilityDefinition& AbilityDefinition,
+	const EMABSDeliveryMode DeliveryMode,
+	const FMABSPresentationCueData& CueData,
+	FTransform& OutPresentationTransform,
+	FString& OutOriginDescription,
+	const FGameplayTag& AbilityTag,
+	const FMABSAbilityHandle& AbilityHandle,
+	const EMABSAbilityRuntimeState RuntimeState,
+	const bool bNotifyOwningClient)
+{
+	AActor* const Owner = GetOwner();
+	if (Owner == nullptr)
+	{
+		OutOriginDescription = TEXT("No owning actor was available for presentation.");
+		return false;
+	}
+
+	FName DeliverySocketName = NAME_None;
+	switch (DeliveryMode)
+	{
+	case EMABSDeliveryMode::HitTrace:
+		DeliverySocketName = AbilityDefinition.HitTraceOriginSocketName;
+		break;
+
+	case EMABSDeliveryMode::Melee:
+		DeliverySocketName = AbilityDefinition.MeleeOriginSocketName;
+		break;
+
+	case EMABSDeliveryMode::Projectile:
+		DeliverySocketName = AbilityDefinition.ProjectileSpawnSocketName;
+		break;
+
+	default:
+		break;
+	}
+
+	const FName PreferredSocketName = !CueData.SocketName.IsNone()
+		? CueData.SocketName
+		: (!DeliverySocketName.IsNone() ? DeliverySocketName : AbilityDefinition.DeliveryOriginSocketName);
+
+	FTransform PresentationTransform = FTransform::Identity;
+	FString ComponentName;
+	if (!PreferredSocketName.IsNone() && TryResolveSocketTransform(PreferredSocketName, PresentationTransform, ComponentName))
+	{
+		PresentationTransform.ConcatenateRotation(CueData.RotationOffset.Quaternion());
+		PresentationTransform.AddToTranslation(PresentationTransform.GetRotation().RotateVector(CueData.LocationOffset));
+		OutPresentationTransform = PresentationTransform;
+		OutOriginDescription = FString::Printf(
+			TEXT("Socket '%s' on '%s'"),
+			*PreferredSocketName.ToString(),
+			*ComponentName);
+		return true;
+	}
+
+	FString FallbackDescription;
+	bool bResolvedFallback = false;
+	switch (DeliveryMode)
+	{
+	case EMABSDeliveryMode::HitTrace:
+	case EMABSDeliveryMode::Projectile:
+		{
+			FVector ViewLocation = FVector::ZeroVector;
+			FRotator ViewRotation = FRotator::ZeroRotator;
+			if (GetTargetTraceViewPoint(ViewLocation, ViewRotation, FallbackDescription))
+			{
+				PresentationTransform = FTransform(ViewRotation, ViewLocation);
+				bResolvedFallback = true;
+			}
+		}
+		break;
+
+	case EMABSDeliveryMode::Direct:
+	case EMABSDeliveryMode::Melee:
+	default:
+		break;
+	}
+
+	if (!bResolvedFallback)
+	{
+		PresentationTransform = Owner->GetActorTransform();
+		FallbackDescription = TEXT("OwnerActorTransform");
+	}
+
+	PresentationTransform.ConcatenateRotation(CueData.RotationOffset.Quaternion());
+	PresentationTransform.AddToTranslation(PresentationTransform.GetRotation().RotateVector(CueData.LocationOffset));
+	OutPresentationTransform = PresentationTransform;
+	OutOriginDescription = FallbackDescription;
+
+	const FMABSAbilityDebugEvent FallbackEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::PresentationSocketFallbackUsed,
+		AbilityTag,
+		AbilityHandle,
+		RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		PreferredSocketName.IsNone()
+			? FString::Printf(
+				TEXT("Using fallback presentation origin '%s' for %s because no presentation socket override was authored."),
+				*FallbackDescription,
+				*GetDeliveryModeLabel(DeliveryMode))
+			: FString::Printf(
+				TEXT("Using fallback presentation origin '%s' for %s because socket '%s' was unavailable."),
+				*FallbackDescription,
+				*GetDeliveryModeLabel(DeliveryMode),
+				*PreferredSocketName.ToString()));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(FallbackEvent);
+	}
+
+	return true;
+}
+
+void UMABSAbilityComponent::TriggerStartupPresentation(const FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr || !AbilityDefinition->StartupPresentation.HasAnyPresentation())
+	{
+		return;
+	}
+
+	FTransform PresentationTransform = FTransform::Identity;
+	FString OriginDescription;
+	if (!ResolvePresentationTransform(
+		*AbilityDefinition,
+		AbilityDefinition->DeliveryMode,
+		AbilityDefinition->StartupPresentation.Cue,
+		PresentationTransform,
+		OriginDescription,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		bNotifyOwningClient))
+	{
+		return;
+	}
+
+	FMABSPresentationCueRuntimeData RuntimeData;
+	RuntimeData.VFX = AbilityDefinition->StartupPresentation.Cue.VFX;
+	RuntimeData.SFX = AbilityDefinition->StartupPresentation.Cue.SFX;
+	RuntimeData.CameraShakeClass = AbilityDefinition->StartupPresentation.Cue.CameraShake.CameraShakeClass;
+	RuntimeData.Location = PresentationTransform.GetLocation();
+	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
+	RuntimeData.CameraShakeInnerRadius = AbilityDefinition->StartupPresentation.Cue.CameraShake.InnerRadius;
+	RuntimeData.CameraShakeOuterRadius = AbilityDefinition->StartupPresentation.Cue.CameraShake.OuterRadius;
+	RuntimeData.CameraShakeFalloff = AbilityDefinition->StartupPresentation.Cue.CameraShake.Falloff;
+	MulticastPlayPresentationCue(RuntimeData);
+
+	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::StartupPresentationTriggered,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Triggered startup presentation for ability '%s' at %s using %s. Assets: %s."),
+			*GetAbilityLabel(AbilityDefinition),
+			*FormatVectorForDebug(RuntimeData.Location),
+			*OriginDescription,
+			*DescribeCueAssets(AbilityDefinition->StartupPresentation.Cue)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(PresentationEvent);
+	}
+}
+
+void UMABSAbilityComponent::TriggerDeliveryPresentation(
+	const FMABSAbilitySpec& AbilitySpec,
+	const EMABSDeliveryMode DeliveryMode,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr || !AbilityDefinition->DeliveryPresentation.Cue.HasAnyPresentation())
+	{
+		return;
+	}
+
+	FTransform PresentationTransform = FTransform::Identity;
+	FString OriginDescription;
+	if (!ResolvePresentationTransform(
+		*AbilityDefinition,
+		DeliveryMode,
+		AbilityDefinition->DeliveryPresentation.Cue,
+		PresentationTransform,
+		OriginDescription,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		bNotifyOwningClient))
+	{
+		return;
+	}
+
+	FMABSPresentationCueRuntimeData RuntimeData;
+	RuntimeData.VFX = AbilityDefinition->DeliveryPresentation.Cue.VFX;
+	RuntimeData.SFX = AbilityDefinition->DeliveryPresentation.Cue.SFX;
+	RuntimeData.CameraShakeClass = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.CameraShakeClass;
+	RuntimeData.Location = PresentationTransform.GetLocation();
+	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
+	RuntimeData.CameraShakeInnerRadius = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.InnerRadius;
+	RuntimeData.CameraShakeOuterRadius = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.OuterRadius;
+	RuntimeData.CameraShakeFalloff = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.Falloff;
+	MulticastPlayPresentationCue(RuntimeData);
+
+	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::DeliveryPresentationTriggered,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Triggered delivery presentation for %s at %s using %s. Assets: %s."),
+			*GetDeliveryModeLabel(DeliveryMode),
+			*FormatVectorForDebug(RuntimeData.Location),
+			*OriginDescription,
+			*DescribeCueAssets(AbilityDefinition->DeliveryPresentation.Cue)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(PresentationEvent);
+	}
+}
+
+void UMABSAbilityComponent::TriggerTracerPresentation(
+	const FMABSAbilitySpec& AbilitySpec,
+	const FVector& TraceStart,
+	const FVector& TraceEnd,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr || !AbilityDefinition->DeliveryPresentation.HitTraceTracer.HasAnyPresentation())
+	{
+		return;
+	}
+
+	if (TraceStart.Equals(TraceEnd, KINDA_SMALL_NUMBER))
+	{
+		const FMABSAbilityDebugEvent FailedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::TracerSpawnFailed,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::DeliveryFailed,
+			TEXT("Tracer presentation could not run because the trace start and end points were the same."));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(FailedEvent);
+		}
+		return;
+	}
+
+	FMABSTracerPresentationRuntimeData RuntimeData;
+	RuntimeData.VFX = AbilityDefinition->DeliveryPresentation.HitTraceTracer.TracerVFX;
+	RuntimeData.SFX = AbilityDefinition->DeliveryPresentation.HitTraceTracer.TracerSFX;
+	RuntimeData.TraceStart = TraceStart;
+	RuntimeData.TraceEnd = TraceEnd;
+	MulticastSpawnTracerPresentation(RuntimeData);
+
+	const FMABSAbilityDebugEvent TracerEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::TracerSpawned,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Spawned tracer presentation from %s to %s. Assets: %s."),
+			*FormatVectorForDebug(TraceStart),
+			*FormatVectorForDebug(TraceEnd),
+			*DescribeTracerAssets(AbilityDefinition->DeliveryPresentation.HitTraceTracer)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(TracerEvent);
+	}
+}
+
+void UMABSAbilityComponent::TriggerImpactPresentation(
+	const FMABSAbilitySpec& AbilitySpec,
+	const FMABSResolvedAbilityTarget& ResolvedTarget,
+	const EMABSDeliveryMode DeliveryMode,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr || !AbilityDefinition->ImpactPresentation.HasAnyPresentation())
+	{
+		return;
+	}
+
+	FVector ImpactLocation = FVector::ZeroVector;
+	FRotator ImpactRotation = FRotator::ZeroRotator;
+	if (ResolvedTarget.bHasImpactHitResult)
+	{
+		ImpactLocation = ResolvedTarget.ImpactHitResult.ImpactPoint;
+		ImpactRotation = ResolvedTarget.ImpactHitResult.ImpactNormal.Rotation();
+	}
+	else if (ResolvedTarget.TargetActor != nullptr)
+	{
+		ImpactLocation = ResolvedTarget.TargetActor->GetActorLocation();
+		ImpactRotation = ResolvedTarget.TargetActor->GetActorRotation();
+	}
+	else if (const AActor* const Owner = GetOwner())
+	{
+		ImpactLocation = Owner->GetActorLocation();
+		ImpactRotation = Owner->GetActorRotation();
+	}
+
+	FTransform PresentationTransform(ImpactRotation, ImpactLocation);
+	PresentationTransform.ConcatenateRotation(AbilityDefinition->ImpactPresentation.Cue.RotationOffset.Quaternion());
+	PresentationTransform.AddToTranslation(
+		PresentationTransform.GetRotation().RotateVector(AbilityDefinition->ImpactPresentation.Cue.LocationOffset));
+
+	FMABSPresentationCueRuntimeData RuntimeData;
+	RuntimeData.VFX = AbilityDefinition->ImpactPresentation.Cue.VFX;
+	RuntimeData.SFX = AbilityDefinition->ImpactPresentation.Cue.SFX;
+	RuntimeData.CameraShakeClass = AbilityDefinition->ImpactPresentation.Cue.CameraShake.CameraShakeClass;
+	RuntimeData.Location = PresentationTransform.GetLocation();
+	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
+	RuntimeData.CameraShakeInnerRadius = AbilityDefinition->ImpactPresentation.Cue.CameraShake.InnerRadius;
+	RuntimeData.CameraShakeOuterRadius = AbilityDefinition->ImpactPresentation.Cue.CameraShake.OuterRadius;
+	RuntimeData.CameraShakeFalloff = AbilityDefinition->ImpactPresentation.Cue.CameraShake.Falloff;
+	MulticastPlayPresentationCue(RuntimeData);
+
+	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::ImpactPresentationTriggered,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Triggered impact presentation for %s on '%s' at %s. Assets: %s."),
+			*GetDeliveryModeLabel(DeliveryMode),
+			*GetNameSafe(ResolvedTarget.TargetActor),
+			*FormatVectorForDebug(RuntimeData.Location),
+			*DescribeCueAssets(AbilityDefinition->ImpactPresentation.Cue)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(PresentationEvent);
+	}
+}
+
+void UMABSAbilityComponent::TriggerProjectileImpactPresentation(
+	const UMABSAbilityDefinition& AbilityDefinition,
+	const FGameplayTag& AbilityTag,
+	const FMABSAbilityHandle& AbilityHandle,
+	const FHitResult& HitResult,
+	AActor* HitActor)
+{
+	if (!AbilityDefinition.ImpactPresentation.HasAnyPresentation())
+	{
+		return;
+	}
+
+	FTransform PresentationTransform(HitResult.ImpactNormal.Rotation(), HitResult.ImpactPoint);
+	PresentationTransform.ConcatenateRotation(AbilityDefinition.ImpactPresentation.Cue.RotationOffset.Quaternion());
+	PresentationTransform.AddToTranslation(
+		PresentationTransform.GetRotation().RotateVector(AbilityDefinition.ImpactPresentation.Cue.LocationOffset));
+
+	FMABSPresentationCueRuntimeData RuntimeData;
+	RuntimeData.VFX = AbilityDefinition.ImpactPresentation.Cue.VFX;
+	RuntimeData.SFX = AbilityDefinition.ImpactPresentation.Cue.SFX;
+	RuntimeData.CameraShakeClass = AbilityDefinition.ImpactPresentation.Cue.CameraShake.CameraShakeClass;
+	RuntimeData.Location = PresentationTransform.GetLocation();
+	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
+	RuntimeData.CameraShakeInnerRadius = AbilityDefinition.ImpactPresentation.Cue.CameraShake.InnerRadius;
+	RuntimeData.CameraShakeOuterRadius = AbilityDefinition.ImpactPresentation.Cue.CameraShake.OuterRadius;
+	RuntimeData.CameraShakeFalloff = AbilityDefinition.ImpactPresentation.Cue.CameraShake.Falloff;
+	MulticastPlayPresentationCue(RuntimeData);
+
+	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::ImpactPresentationTriggered,
+		AbilityTag,
+		AbilityHandle,
+		EMABSAbilityRuntimeState::Idle,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Triggered projectile impact presentation on '%s' at %s. Assets: %s."),
+			*GetNameSafe(HitActor),
+			*FormatVectorForDebug(RuntimeData.Location),
+			*DescribeCueAssets(AbilityDefinition.ImpactPresentation.Cue)));
+	EmitDebugEventToOwningClient(PresentationEvent);
+}
+
+void UMABSAbilityComponent::PlayPresentationCueLocally(const FMABSPresentationCueRuntimeData& CueData) const
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (CueData.VFX != nullptr)
+	{
+		UGameplayStatics::SpawnEmitterAtLocation(World, CueData.VFX, FTransform(CueData.Rotation, CueData.Location));
+	}
+
+	if (CueData.SFX != nullptr)
+	{
+		UGameplayStatics::SpawnSoundAtLocation(this, CueData.SFX, CueData.Location, CueData.Rotation);
+	}
+
+	if (CueData.CameraShakeClass != nullptr)
+	{
+		UGameplayStatics::PlayWorldCameraShake(
+			this,
+			CueData.CameraShakeClass,
+			CueData.Location,
+			CueData.CameraShakeInnerRadius,
+			FMath::Max(CueData.CameraShakeInnerRadius, CueData.CameraShakeOuterRadius),
+			CueData.CameraShakeFalloff);
+	}
+}
+
+void UMABSAbilityComponent::SpawnTracerPresentationLocally(const FMABSTracerPresentationRuntimeData& TracerData) const
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	const FRotator TracerRotation = (TracerData.TraceEnd - TracerData.TraceStart).Rotation();
+	if (TracerData.VFX != nullptr)
+	{
+		if (UParticleSystemComponent* const TracerComponent = UGameplayStatics::SpawnEmitterAtLocation(
+			World,
+			TracerData.VFX,
+			FTransform(TracerRotation, TracerData.TraceStart)))
+		{
+			TracerComponent->SetVectorParameter(TEXT("MABS_TraceStart"), TracerData.TraceStart);
+			TracerComponent->SetVectorParameter(TEXT("MABS_TraceEnd"), TracerData.TraceEnd);
+			TracerComponent->SetVectorParameter(TEXT("MABS_ImpactPoint"), TracerData.TraceEnd);
+		}
+	}
+
+	if (TracerData.SFX != nullptr)
+	{
+		UGameplayStatics::SpawnSoundAtLocation(this, TracerData.SFX, TracerData.TraceStart, TracerRotation);
+	}
 }
 
 bool UMABSAbilityComponent::ValidateTargetActorForAbility(

@@ -5,16 +5,21 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Debug/MABSAbilityDebugTypes.h"
+#include "Engine/EngineTypes.h"
 #include "GameplayTagContainer.h"
 #include "TimerManager.h"
 #include "Types/MABSAbilityTypes.h"
+#include "Types/MABSPresentationTypes.h"
 #include "MABSAbilityComponent.generated.h"
 
 class AMABSProjectileBase;
 class AActor;
 class UAnimMontage;
+class UCameraShakeBase;
+class UParticleSystem;
 class USceneComponent;
 class USkeletalMeshComponent;
+class USoundBase;
 class UMABSAbilityDefinition;
 struct FHitResult;
 
@@ -23,6 +28,61 @@ struct FMABSAbilityExecutionContext
 	FTimerHandle DeliveryTimerHandle;
 	FTimerHandle RecoveryTimerHandle;
 	bool bNotifyOwningClient = false;
+};
+
+struct FMABSResolvedAbilityTarget
+{
+	AActor* TargetActor = nullptr;
+	FHitResult ImpactHitResult;
+	bool bHasImpactHitResult = false;
+};
+
+USTRUCT()
+struct FMABSPresentationCueRuntimeData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UParticleSystem> VFX = nullptr;
+
+	UPROPERTY()
+	TObjectPtr<USoundBase> SFX = nullptr;
+
+	UPROPERTY()
+	TSubclassOf<UCameraShakeBase> CameraShakeClass = nullptr;
+
+	UPROPERTY()
+	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY()
+	FRotator Rotation = FRotator::ZeroRotator;
+
+	UPROPERTY()
+	float CameraShakeInnerRadius = 0.0f;
+
+	UPROPERTY()
+	float CameraShakeOuterRadius = 0.0f;
+
+	UPROPERTY()
+	float CameraShakeFalloff = 1.0f;
+};
+
+USTRUCT()
+struct FMABSTracerPresentationRuntimeData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UParticleSystem> VFX = nullptr;
+
+	UPROPERTY()
+	TObjectPtr<USoundBase> SFX = nullptr;
+
+	UPROPERTY()
+	FVector TraceStart = FVector::ZeroVector;
+
+	UPROPERTY()
+	FVector TraceEnd = FVector::ZeroVector;
 };
 
 UCLASS(ClassGroup=(MABS), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
@@ -114,6 +174,12 @@ private:
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayActivationMontage(UAnimMontage* Montage, float PlayRate);
 
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayPresentationCue(const FMABSPresentationCueRuntimeData& CueData);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastSpawnTracerPresentation(const FMABSTracerPresentationRuntimeData& TracerData);
+
 	EMABSAbilityActivationResult HandleTryActivateAbility(const FGameplayTag& AbilityTag, bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const;
@@ -132,17 +198,17 @@ private:
 
 	EMABSAbilityActivationResult CommitAbility(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
-	AActor* ExecuteDirectDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
+	FMABSResolvedAbilityTarget ExecuteDirectDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
 
-	AActor* ExecuteHitTraceDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
+	FMABSResolvedAbilityTarget ExecuteHitTraceDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
 
-	AActor* ExecuteMeleeDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
+	FMABSResolvedAbilityTarget ExecuteMeleeDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult ExecuteProjectileDelivery(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult CompleteResolvedTargetAbility(
 		FMABSAbilitySpec& AbilitySpec,
-		AActor* TargetActor,
+		const FMABSResolvedAbilityTarget& ResolvedTarget,
 		EMABSDeliveryMode DeliveryMode,
 		bool bNotifyOwningClient);
 
@@ -167,6 +233,8 @@ private:
 		FName TraceHitEventName,
 		FName TraceRejectedEventName,
 		FString& OutDebugMessage,
+		FHitResult* OutAcceptedHitResult,
+		FVector* OutTraceEndPoint,
 		bool bNotifyOwningClient);
 
 	EMABSAbilityActivationResult ApplyInstantEffect(
@@ -242,6 +310,44 @@ private:
 		FTransform& OutSpawnTransform,
 		FString& OutDebugMessage,
 		bool bNotifyOwningClient);
+
+	bool ResolvePresentationTransform(
+		const UMABSAbilityDefinition& AbilityDefinition,
+		EMABSDeliveryMode DeliveryMode,
+		const FMABSPresentationCueData& CueData,
+		FTransform& OutPresentationTransform,
+		FString& OutOriginDescription,
+		const FGameplayTag& AbilityTag,
+		const FMABSAbilityHandle& AbilityHandle,
+		EMABSAbilityRuntimeState RuntimeState,
+		bool bNotifyOwningClient);
+
+	void TriggerStartupPresentation(const FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+
+	void TriggerDeliveryPresentation(const FMABSAbilitySpec& AbilitySpec, EMABSDeliveryMode DeliveryMode, bool bNotifyOwningClient);
+
+	void TriggerTracerPresentation(
+		const FMABSAbilitySpec& AbilitySpec,
+		const FVector& TraceStart,
+		const FVector& TraceEnd,
+		bool bNotifyOwningClient);
+
+	void TriggerImpactPresentation(
+		const FMABSAbilitySpec& AbilitySpec,
+		const FMABSResolvedAbilityTarget& ResolvedTarget,
+		EMABSDeliveryMode DeliveryMode,
+		bool bNotifyOwningClient);
+
+	void TriggerProjectileImpactPresentation(
+		const UMABSAbilityDefinition& AbilityDefinition,
+		const FGameplayTag& AbilityTag,
+		const FMABSAbilityHandle& AbilityHandle,
+		const FHitResult& HitResult,
+		AActor* HitActor);
+
+	void PlayPresentationCueLocally(const FMABSPresentationCueRuntimeData& CueData) const;
+
+	void SpawnTracerPresentationLocally(const FMABSTracerPresentationRuntimeData& TracerData) const;
 
 	float GetEffectiveDeliveryDelay(const UMABSAbilityDefinition& AbilityDefinition) const;
 

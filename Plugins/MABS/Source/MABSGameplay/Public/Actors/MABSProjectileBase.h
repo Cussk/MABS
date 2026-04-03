@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "Net/UnrealNetwork.h"
 #include "Types/MABSAbilityTypes.h"
 #include "MABSProjectileBase.generated.h"
 
@@ -23,6 +24,10 @@ class MABSGAMEPLAY_API AMABSProjectileBase : public AActor
 public:
 
 	AMABSProjectileBase();
+
+	virtual void BeginPlay() override;
+
+	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 
 	void InitializeProjectile(
 		UMABSAbilityComponent* InOwningAbilityComponent,
@@ -66,6 +71,9 @@ protected:
 private:
 
 	UFUNCTION()
+	void OnRep_SourceAbilityDefinition();
+
+	UFUNCTION()
 	void HandleCollisionHit(
 		UPrimitiveComponent* HitComponent,
 		AActor* OtherActor,
@@ -86,17 +94,23 @@ private:
 
 	UMABSAbilityComponent* ResolveOwningAbilityComponent() const;
 
-	UPROPERTY(Transient)
+	void ActivateTravelPresentation();
+
+	UPROPERTY(Transient, Replicated)
 	TObjectPtr<AActor> SourceActor = nullptr;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, ReplicatedUsing=OnRep_SourceAbilityDefinition)
 	TObjectPtr<UMABSAbilityDefinition> SourceAbilityDefinition = nullptr;
 
 	TWeakObjectPtr<UMABSAbilityComponent> OwningAbilityComponent;
 
+	UPROPERTY(Transient, Replicated)
 	FGameplayTag SourceAbilityTag;
 
+	UPROPERTY(Transient, Replicated)
 	FMABSAbilityHandle SourceAbilityHandle;
 
 	bool bImpactHandled = false;
+
+	bool bTravelPresentationActivated = false;
 };

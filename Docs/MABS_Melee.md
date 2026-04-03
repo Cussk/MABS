@@ -17,35 +17,37 @@ Use:
 * `MeleeRange`
 * `MeleeRadius`
 * `MeleeForwardOffset`
+* `StartupPresentation.Cue`
+* `DeliveryPresentation.Cue`
+* `ImpactPresentation.Cue`
 
 ## Runtime behavior
 
 On authority, MABS:
 
-1. starts delivery
-2. uses the authored melee socket or fallback origin as the sweep start location
-3. uses the owning actor's current facing as the sweep direction
-4. falls back to controller or eye-view yaw only if actor forward is unavailable
+1. enters delivery at the authored delivery time
+2. triggers delivery presentation at the melee origin
+3. uses the authored melee socket or fallback origin as the sweep start location
+4. uses the owning actor's current facing as the sweep direction
 5. validates the first resolved actor
 6. applies the authored instant effect
-7. spends cost and starts cooldown on successful commit
+7. triggers impact presentation on successful effect application
+8. spends cost and starts cooldown on successful commit
 
 ## Debug events
 
 Use:
 
-* `DeliveryStarted`
+* `DeliveryPresentationTriggered`
 * `MeleeHit`
 * `MeleeRejected`
-* `DeliveryFailed`
+* `ImpactPresentationTriggered`
 
 ## Example
 
 Example sword slash:
 
-* `TargetType = Actor`
-* `DeliveryMode = Melee`
-* `MeleeRange = 200`
-* `MeleeRadius = 75`
-* `MeleeForwardOffset = 50`
-* `InstantEffectType = Damage`
+* `MeleeOriginSocketName = weapon_tip`
+* `StartupPresentation.Cue.SFX = Sword_Windup`
+* `DeliveryPresentation.Cue.SFX = Sword_Swing`
+* `ImpactPresentation.Cue.VFX = P_SwordImpact`

@@ -2,7 +2,7 @@
 
 ## What it is
 
-This document lists the current Phase 5 public surface for MABS and shows which module owns authored timing, socket data, runtime scheduling state, projectile runtime, and debug helpers.
+This document lists the current Phase 6 public surface for MABS and shows which module owns authored presentation data, runtime scheduling state, projectile travel presentation, and debug helpers.
 
 ## Module ownership
 
@@ -22,11 +22,18 @@ Owns shared authored data and runtime types:
 * `FMABSCooldownGroupState`
 * `FMABSAbilityDebugEvent`
 * `FMABSTargetTraceDebugInfo`
+* `FMABSPresentationCameraShakeData`
+* `FMABSPresentationCueData`
+* `FMABSHitTraceTracerPresentationData`
+* `FMABSProjectileTravelPresentationData`
+* `FMABSPresentationStartupData`
+* `FMABSPresentationDeliveryData`
+* `FMABSPresentationImpactData`
 * `UMABSAbilityDefinition`
 
 ### `MABSGameplay`
 
-Owns gameplay execution:
+Owns gameplay and cosmetic trigger execution:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
@@ -35,39 +42,16 @@ Owns gameplay execution:
 
 ### `MABSDebug`
 
-Owns runtime-safe presentation helpers:
+Owns runtime-safe debug helpers:
 
 * `UMABSDebugBlueprintLibrary`
 * `AMABSDebugHUD`
-
-## Important enums
-
-### `EMABSAbilityActivationResult`
-
-Current notable values:
-
-* `Success`
-* `RequestSentToServer`
-* `OnCooldown`
-* `InsufficientResources`
-* `DeliveryFailed`
-* `TargetResolutionFailed`
-* `EffectApplicationFailed`
-
-### `EMABSDeliveryMode`
-
-Current values:
-
-* `Direct`
-* `HitTrace`
-* `Melee`
-* `Projectile`
 
 ## Important structs
 
 ### `FMABSAbilitySpec`
 
-Current fields:
+Runtime fields remain:
 
 * `Handle`
 * `AbilityDefinition`
@@ -78,6 +62,25 @@ Current fields:
 * `ActivationStartTime`
 * `ScheduledDeliveryTime`
 * `RecoveryEndTime`
+
+### `FMABSPresentationCueData`
+
+Shared authored cue fields:
+
+* `VFX`
+* `SFX`
+* `CameraShake`
+* `SocketName`
+* `LocationOffset`
+* `RotationOffset`
+
+### `FMABSPresentationDeliveryData`
+
+Delivery presentation fields:
+
+* `Cue`
+* `HitTraceTracer`
+* `ProjectileTravel`
 
 ### `FMABSTargetTraceDebugInfo`
 
@@ -91,6 +94,7 @@ Current notable fields:
 * `TraceMode`
 * `TraceStart`
 * `TraceEnd`
+* `HitLocation`
 * `TraceRadius`
 * `HitActorName`
 * `TraceLabel`
@@ -103,39 +107,21 @@ Current notable fields:
 
 Current authored fields include:
 
-* `AbilityTag`
-* `DisplayName`
-* `ActivationPolicy`
-* `TargetType`
-* `DeliveryMode`
-* `InstantEffectType`
-* `EffectMagnitude`
+* core ability identity, effect, cooldown, and cost data
 * `StartupDuration`
 * `DeliveryTime`
-* `RecoveryDuration` as total ability duration from activation start
+* `RecoveryDuration`
 * direct targeting fields
 * `DeliveryOriginSocketName`
-* `HitTraceDistance`
-* `HitTraceRadius`
-* `HitTraceOriginSocketName`
-* `HitTraceOriginOffset`
-* `MeleeRange`
-* `MeleeRadius`
-* `MeleeOriginSocketName`
-* `MeleeOriginOffset`
-* `MeleeForwardOffset`
-* `ProjectileActorClass`
-* `ProjectileSpawnSocketName`
-* `ProjectileSpawnOffset`
-* `ActivationMontage`
-* `MontagePlayRate`
-* `CooldownSeconds`
-* `CooldownGroupTag`
-* `ResourceCost`
+* hit-trace, melee, and projectile delivery socket fields
+* optional montage fields
+* `StartupPresentation`
+* `DeliveryPresentation`
+* `ImpactPresentation`
 
 ### `UMABSAbilityComponent`
 
-Still exposes:
+Public Blueprint-facing functions remain:
 
 * `GrantAbility(...)`
 * `SetAbilityBlockedByTag(...)`
@@ -148,18 +134,6 @@ Still exposes:
 * `GetRecentDebugEvents()`
 * `GetLatestTargetTraceDebugInfo()`
 
-Runtime ownership now includes:
-
-* granted ability specs
-* cooldown-group state
-* startup, delivery, and recovery scheduling
-* socket-based origin resolution
-* optional montage request hooks
-* delivery execution
-* projectile spawn and impact integration
-* recent debug events
-* the latest target or delivery trace snapshot
-
 ### `AMABSProjectileBase`
 
 The built-in reusable projectile actor for `Projectile` delivery.
@@ -167,36 +141,22 @@ The built-in reusable projectile actor for `Projectile` delivery.
 It:
 
 * replicates movement
-* stores the source ability and source actor context
+* stores replicated source ability context
 * routes authoritative impact handling back through `UMABSAbilityComponent`
 * applies the authored instant effect on a valid impact
+* locally activates authored projectile travel presentation from the replicated projectile
 
 ## Important debug events
 
-Phase 5 adds or highlights:
+Phase 6 adds or highlights:
 
-* `StartupStarted`
-* `DeliveryScheduled`
-* `DeliveryTriggered`
-* `SocketResolved`
-* `SocketFallbackUsed`
-* `MontagePlayRequested`
-* `MontagePlayFailed`
-* `RecoveryStarted`
-* `RecoveryCompleted`
-* `DeliveryStarted`
-* `DeliveryFailed`
-* `HitTraceHit`
-* `HitTraceRejected`
-* `MeleeHit`
-* `MeleeRejected`
-* `ProjectileSpawned`
-* `ProjectileSpawnFailed`
-* `ProjectileImpact`
-* `ProjectileImpactRejected`
-* `EffectApplied`
-* `CooldownStarted`
-* `CommitSucceeded`
+* `StartupPresentationTriggered`
+* `DeliveryPresentationTriggered`
+* `TracerSpawned`
+* `TracerSpawnFailed`
+* `ProjectileTravelPresentationTriggered`
+* `ImpactPresentationTriggered`
+* `PresentationSocketFallbackUsed`
 
 ## Example
 
@@ -209,5 +169,3 @@ if (AbilityComponent != nullptr && HasAuthority())
 const EMABSAbilityActivationResult Result =
 	AbilityComponent->TryActivateAbilityByTag(FireballTag);
 ```
-
-For `Projectile`, a `Success` result still means the projectile was spawned authoritatively and the ability committed successfully. The later impact result is reported through debug events, while the granted spec already moves through `Startup`, `Active`, and `Recovery`.

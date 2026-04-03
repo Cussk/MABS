@@ -7,6 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "Net/UnrealNetwork.h"
 #include "Types/MABSAbilityTypes.h"
+#include "Types/MABSPresentationTypes.h"
 #include "MABSProjectileBase.generated.h"
 
 class UMABSAbilityComponent;
@@ -71,6 +72,9 @@ protected:
 private:
 
 	UFUNCTION()
+	void OnRep_SourceActor();
+
+	UFUNCTION()
 	void OnRep_SourceAbilityDefinition();
 
 	UFUNCTION()
@@ -94,9 +98,20 @@ private:
 
 	UMABSAbilityComponent* ResolveOwningAbilityComponent() const;
 
+	bool BuildProjectileTravelCueEvent(FMABSProjectileTravelCueEvent& OutCueEvent) const;
+
+	bool ShouldRealizeTravelCueLocally(
+		const FMABSProjectileTravelCueEvent& CueEvent,
+		bool& bOutShouldRetry,
+		FString& OutSkipReason) const;
+
+	bool IsSourceActorLocallyControlled() const;
+
+	void RealizeTravelCueLocally(const FMABSProjectileTravelCueEvent& CueEvent);
+
 	void ActivateTravelPresentation();
 
-	UPROPERTY(Transient, Replicated)
+	UPROPERTY(Transient, ReplicatedUsing=OnRep_SourceActor)
 	TObjectPtr<AActor> SourceActor = nullptr;
 
 	UPROPERTY(Transient, ReplicatedUsing=OnRep_SourceAbilityDefinition)

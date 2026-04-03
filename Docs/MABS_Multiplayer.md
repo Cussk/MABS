@@ -2,15 +2,15 @@
 
 ## What it is
 
-This document explains how Phase 6 handles multiplayer authority for activation, delivery, projectile runtime, costs, cooldowns, presentation, and debug visibility.
+This document explains how Phase 6.5 handles multiplayer authority for activation, delivery, projectile runtime, costs, cooldowns, cue routing, and cosmetic realization.
 
 ## Why it exists
 
-Delivery and presentation are easy to get wrong if clients can decide hits, sweeps, projectile impact, or cosmetic timing. MABS keeps gameplay decisions on the server while routing relevant cosmetic results out to clients in a controlled way.
+Presentation is cosmetic, but cue routing still has multiplayer rules. If those rules are not explicit, it is easy to accidentally mix gameplay authority with cosmetic visibility.
 
 ## Server authority
 
-The server owns:
+The server still owns:
 
 * granting
 * cooldown validation
@@ -22,52 +22,66 @@ The server owns:
 * damage and heal application
 * presentation timing decisions
 
-## Client behavior
+## Cue routing in multiplayer
 
-When a remote client calls `TryActivateAbilityByTag`:
+Authority still decides when startup, delivery, tracer, projectile travel, and impact happen.
 
-1. the local component records `RequestStarted`
-2. the local component sends `ServerTryActivateAbilityByTag`
-3. the local return value is `RequestSentToServer`
-4. authority validates and executes the authored delivery mode
-5. the owning client receives the authoritative debug events
+Phase 6.5 then routes cosmetics through a small visibility policy:
 
-## Presentation behavior in multiplayer
+* `RelevantClients`
+* `OwnerOnly`
+* `LocalOnly`
 
-Presentation is cosmetic, but Phase 6 still routes it from authority:
+Practical behavior:
 
-* startup presentation starts when authority enters startup
-* delivery presentation starts when authority reaches the authored delivery time
-* hit-trace tracer presentation uses the authoritative trace path
-* projectile travel presentation runs from the replicated projectile actor
-* impact presentation starts after the authoritative gameplay result succeeds
+* `RelevantClients` uses the normal cosmetic multicast path
+* `OwnerOnly` routes only to the owning client when one exists
+* `OwnerOnly` falls back to `RelevantClients` if no owning client exists
+* `LocalOnly` stays local and does not become a gameplay fact
 
-Clients do not authoritatively decide gameplay results.
+## Dedicated server behavior
+
+Dedicated servers:
+
+* still make authoritative gameplay decisions
+* still route cosmetic results outward when needed
+* do not realize local VFX, SFX, or camera shake
+* skip local-only cue realization completely
+
+That keeps gameplay correct without wasting server time on local cosmetic work.
+
+## Projectile travel behavior
+
+Projectile travel cues still come from the replicated projectile actor.
+
+Phase 6.5 changes that path so the projectile evaluates a lightweight travel cue payload and applies the same small visibility-policy model locally on each instance.
 
 ## Runtime overlay
 
-`AMABSDebugHUD` is still client-side runtime UI. It does not make gameplay decisions.
+`AMABSDebugHUD` is still local runtime UI only. It does not make gameplay decisions.
 
-It displays:
+It now helps explain:
 
+* whether a cue was routed, skipped, or realized
+* whether a policy fallback was used
 * the latest authoritative trace or sweep snapshot
 * replicated ability runtime summaries
-* recent mirrored debug events
 
 ## Verification checklist
 
 Singleplayer:
 
-* each delivery mode succeeds or fails correctly
+* startup, delivery, tracer, projectile travel, and impact cues all realize
+* local-only cues still work
 
 Listen server:
 
-* host can use every delivery mode
-* remote clients receive authoritative delivery results
-* projectile impact remains authoritative
+* host sees routed and realized cue timing correctly
+* remote client requests still resolve on authority
+* owner-only cues only appear for the owning player
 
 Dedicated server:
 
-* delivery logic stays server-authoritative
-* projectile spawn and impact stay server-authoritative
-* no editor-only dependency leaks into runtime code
+* gameplay remains authoritative
+* local-only cues are skipped cleanly
+* server builds do not depend on cosmetic realization

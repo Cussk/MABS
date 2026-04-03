@@ -2,122 +2,133 @@
 
 ## What it is
 
-Phase 6 adds the first built-in cosmetic layer to MABS.
+Phase 6.5 keeps the Phase 6 authored presentation groups, but runtime cosmetics now flow through lightweight cue events instead of realizing every effect inline inside gameplay branches.
 
-Abilities can now author:
-
-* startup presentation
-* delivery presentation
-* hit-trace tracer presentation
-* projectile travel presentation
-* impact presentation
-
-## Why it exists
-
-Gameplay correctness is not enough for a practical combat framework.
-
-Phase 6 keeps the server-authoritative gameplay model from earlier phases, but adds the minimum presentation coverage most teams expect from a usable combat system.
-
-## Authored data
-
-`UMABSAbilityDefinition` now exposes three grouped presentation fields:
+Abilities still author:
 
 * `StartupPresentation`
 * `DeliveryPresentation`
 * `ImpactPresentation`
+* `DeliveryPresentation.HitTraceTracer`
+* `DeliveryPresentation.ProjectileTravel`
 
-Those groups are built from:
+Each shared cue, tracer cue, and projectile-travel cue now also authors a small `VisibilityPolicy`.
 
-* `FMABSPresentationCueData` for shared VFX, SFX, camera shake, optional socket override, and offsets
-* `FMABSHitTraceTracerPresentationData` for hit-trace travel/tracer presentation
-* `FMABSProjectileTravelPresentationData` for projectile-attached travel presentation
+## Why it exists
 
-## When presentation happens
+Phase 6 already proved the timing model worked, but large combat scenes needed a cleaner presentation path:
 
-Startup:
+* gameplay should still decide when startup, delivery, tracer, travel, and impact happen
+* cosmetic realization should not be hard-wired into every gameplay branch
+* repeated small Niagara effects should have a clearer reuse path
+* dedicated servers should skip local cosmetic work cleanly
 
-* triggers when the ability enters `Startup`
+Phase 6.5 solves that without turning MABS into a large gameplay-cue framework.
 
-Delivery:
+## Authored data
 
-* triggers at the authored delivery moment
-* uses the same timing already used for gameplay delivery
+`UMABSAbilityDefinition` still exposes the same grouped fields:
 
-Impact:
+* `StartupPresentation.Cue`
+* `DeliveryPresentation.Cue`
+* `DeliveryPresentation.HitTraceTracer`
+* `DeliveryPresentation.ProjectileTravel`
+* `ImpactPresentation.Cue`
 
-* triggers when the gameplay hit or effect application succeeds
+Shared cue data still authors:
 
-Projectile travel:
+* `VFX`
+* `SFX`
+* `CameraShake`
+* `SocketName`
+* `LocationOffset`
+* `RotationOffset`
+* `VisibilityPolicy`
 
-* starts from the spawned replicated projectile actor
+Tracer and projectile-travel data now also author `VisibilityPolicy`.
 
-## Socket rules
+## Runtime cue model
 
-Startup and delivery presentation use this origin order:
+Authority still decides when presentation moments happen.
 
-1. the presentation cue socket override
-2. the delivery-mode socket on the ability definition
-3. `DeliveryOriginSocketName`
-4. a safe fallback transform
+At runtime, MABS now builds lightweight payloads:
 
-If a presentation socket is missing, MABS falls back safely and emits `PresentationSocketFallbackUsed`.
+* `FMABSPresentationCueEvent`
+* `FMABSTracerCueEvent`
+* `FMABSProjectileTravelCueEvent`
 
-Impact presentation uses the resolved hit location, or the target actor location if no explicit hit point exists.
+Those payloads carry only the data needed to realize the cue:
 
-## Delivery-mode examples
+* cue phase
+* visibility policy
+* asset references
+* transform or trace path
+* minimal debug identity like ability tag and handle
 
-`Direct`
+`UMABSAbilityComponent` still clearly shows when startup, delivery, tracer, and impact happen. The difference is that it now routes those moments through small helpers before anything is spawned locally.
 
-* startup cast cue
-* delivery cue at the owner
-* impact cue on the owner or resolved target
+Projectile travel still activates from `AMABSProjectileBase`, but it now follows the same cue-style payload and visibility-policy model.
 
-`HitTrace`
+## Visibility policy
 
-* startup cue
-* muzzle or spawn cue at delivery
-* tracer from origin to hit or end point
-* impact cue on successful effect application
+Phase 6.5 adds a small policy model for cosmetic routing:
 
-`Melee`
+* `RelevantClients`
+* `OwnerOnly`
+* `LocalOnly`
 
-* startup cue
-* swing-origin or hand cue at delivery
-* impact cue on successful hit
+Practical behavior:
 
-`Projectile`
+* `RelevantClients` is the default for shared gameplay presentation
+* `OwnerOnly` routes to the owning client when one exists
+* `OwnerOnly` falls back to `RelevantClients` if no owning client exists, and emits `PresentationCuePolicyFallbackUsed`
+* `LocalOnly` realizes only on a locally controlled instance or standalone, and is skipped on dedicated server
 
-* startup cue
-* spawn or muzzle cue at delivery
-* projectile travel VFX and SFX on the replicated projectile
-* impact cue on projectile hit
+This policy changes cosmetic routing only. It does not change gameplay authority.
+
+## Reuse and pooling foundations
+
+Phase 6.5 does not add a giant pool manager.
+
+It does centralize the spam-prone Niagara paths:
+
+* world-space startup, delivery, and impact cues
+* hit-trace tracer cues
+
+`UMABSAbilityComponent` now reuses Niagara components for those paths when the same system is available and inactive, which gives repeated muzzle flashes, impact bursts, and tracers a lightweight reuse path without adding a heavy subsystem.
 
 ## How to use it
 
-1. Open a `UMABSAbilityDefinition`.
-2. Fill `StartupPresentation.Cue` if the ability should show a cast cue.
-3. Fill `DeliveryPresentation.Cue` if the ability should show a muzzle, hand, or spawn cue.
-4. Fill `DeliveryPresentation.HitTraceTracer` for `HitTrace` travel visuals.
-5. Fill `DeliveryPresentation.ProjectileTravel` for `Projectile` travel visuals.
-6. Fill `ImpactPresentation.Cue` for direct, hit trace, melee, or projectile impacts.
-7. Activate the ability and verify the timing through debug events.
+1. Author presentation the same way you did in Phase 6.
+2. Leave `VisibilityPolicy = RelevantClients` unless the cue is intentionally owner-only or local-only.
+3. Use `OwnerOnly` for UI-adjacent or personal cues.
+4. Use `LocalOnly` only when a cue should stay entirely local.
+5. Test the cue in standalone, listen server, and dedicated server.
+6. Read routing events in the debug log or overlay if the cue does not behave as expected.
 
 ## Example
 
 Example rifle shot:
 
-* `StartupPresentation.Cue.SFX = Rifle_Cast`
-* `DeliveryPresentation.Cue.VFX = P_RifleMuzzle`
-* `DeliveryPresentation.HitTraceTracer.TracerVFX = P_RifleTracer`
-* `ImpactPresentation.Cue.VFX = P_BulletImpact`
-* `ImpactPresentation.Cue.SFX = Bullet_Impact`
+* `DeliveryPresentation.Cue.VFX = NS_RifleMuzzle`
+* `DeliveryPresentation.Cue.VisibilityPolicy = RelevantClients`
+* `DeliveryPresentation.HitTraceTracer.TracerVFX = NS_RifleTracer`
+* `DeliveryPresentation.HitTraceTracer.VisibilityPolicy = RelevantClients`
+* `ImpactPresentation.Cue.VFX = NS_BulletImpact`
+
+Runtime result:
+
+* authority decides when delivery happens
+* MABS builds a delivery cue event and a tracer cue event
+* the router sends both through the relevant-clients path
+* repeated tracer and impact Niagara systems can reuse inactive local components
 
 ## Not included
 
-Phase 6 does not add:
+Phase 6.5 still does not add:
 
-* montage-notify-driven presentation as the primary path
-* Niagara-specific editor tooling
-* melee trail authoring
-* advanced camera systems
-* advanced audio routing
+* a tag-heavy GAS-style cue database
+* a giant global VFX or audio manager
+* advanced significance or distance culling
+* prediction-driven presentation
+* a generalized pool framework for every cue type

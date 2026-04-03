@@ -63,21 +63,21 @@ Phase 6 adds these presentation-focused events:
 
 Current v1 presentation support uses:
 
-* `UParticleSystem` for VFX
+* `UNiagaraSystem` for VFX
 * `USoundBase` for SFX
 * `UCameraShakeBase` for optional shake
 
-Hit-trace tracers set these vector parameters on the spawned particle component when available:
+Hit-trace tracers set these vector parameters on the spawned Niagara component when available:
 
-* `MABS_TraceStart`
-* `MABS_TraceEnd`
-* `MABS_ImpactPoint`
+* `User.MABS_TraceStart`
+* `User.MABS_TraceEnd`
+* `User.MABS_ImpactPoint`
 
 ## Not included
 
 Phase 6 still does not add:
 
-* Niagara-specific tooling
+* custom Niagara editor tooling
 * montage-notify-only presentation paths
 * melee trail systems
 * advanced audio routing

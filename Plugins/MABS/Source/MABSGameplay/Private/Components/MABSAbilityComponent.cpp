@@ -49,6 +49,10 @@ namespace MABSAbilityComponentEventNames
 	static const FName MontagePlayFailed(TEXT("MontagePlayFailed"));
 	static const FName MontagePlayRequested(TEXT("MontagePlayRequested"));
 	static const FName PresentationAssetMissing(TEXT("PresentationAssetMissing"));
+	static const FName PresentationCuePolicyFallbackUsed(TEXT("PresentationCuePolicyFallbackUsed"));
+	static const FName PresentationCueRealized(TEXT("PresentationCueRealized"));
+	static const FName PresentationCueRouted(TEXT("PresentationCueRouted"));
+	static const FName PresentationCueSkipped(TEXT("PresentationCueSkipped"));
 	static const FName PresentationSocketFallbackUsed(TEXT("PresentationSocketFallbackUsed"));
 	static const FName ProjectileImpact(TEXT("ProjectileImpact"));
 	static const FName ProjectileImpactRejected(TEXT("ProjectileImpactRejected"));
@@ -74,6 +78,9 @@ namespace MABSAbilityComponentEventNames
 	static const FName DeliveryTriggered(TEXT("DeliveryTriggered"));
 	static const FName DeliveryPresentationTriggered(TEXT("DeliveryPresentationTriggered"));
 	static const FName ImpactPresentationTriggered(TEXT("ImpactPresentationTriggered"));
+	static const FName TracerCueRealized(TEXT("TracerCueRealized"));
+	static const FName TracerCueRouted(TEXT("TracerCueRouted"));
+	static const FName TracerCueSkipped(TEXT("TracerCueSkipped"));
 	static const FName TracerSpawned(TEXT("TracerSpawned"));
 	static const FName TracerSpawnFailed(TEXT("TracerSpawnFailed"));
 }
@@ -179,6 +186,42 @@ namespace
 		}
 	}
 
+	FString GetPresentationCuePhaseLabel(const EMABSPresentationCuePhase CuePhase)
+	{
+		switch (CuePhase)
+		{
+		case EMABSPresentationCuePhase::Delivery:
+			return TEXT("Delivery");
+
+		case EMABSPresentationCuePhase::Tracer:
+			return TEXT("Tracer");
+
+		case EMABSPresentationCuePhase::ProjectileTravel:
+			return TEXT("ProjectileTravel");
+
+		case EMABSPresentationCuePhase::Impact:
+			return TEXT("Impact");
+
+		default:
+			return TEXT("Startup");
+		}
+	}
+
+	FString GetPresentationVisibilityPolicyLabel(const EMABSPresentationCueVisibilityPolicy VisibilityPolicy)
+	{
+		switch (VisibilityPolicy)
+		{
+		case EMABSPresentationCueVisibilityPolicy::OwnerOnly:
+			return TEXT("OwnerOnly");
+
+		case EMABSPresentationCueVisibilityPolicy::LocalOnly:
+			return TEXT("LocalOnly");
+
+		default:
+			return TEXT("RelevantClients");
+		}
+	}
+
 	FString GetTargetTraceModeLabel(const EMABSTargetTraceMode TraceMode)
 	{
 		switch (TraceMode)
@@ -247,6 +290,25 @@ namespace
 		return AssetLabels.IsEmpty() ? TEXT("no presentation assets") : FString::Join(AssetLabels, TEXT(", "));
 	}
 
+	FString DescribeCueEventAssets(const FMABSPresentationCueEvent& CueEvent)
+	{
+		TArray<FString> AssetLabels;
+		if (CueEvent.VFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(CueEvent.VFX)));
+		}
+		if (CueEvent.SFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(CueEvent.SFX)));
+		}
+		if (CueEvent.CameraShakeClass != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("CameraShake=%s"), *GetNameSafe(CueEvent.CameraShakeClass)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no presentation assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+
 	FString DescribeTracerAssets(const FMABSHitTraceTracerPresentationData& TracerData)
 	{
 		TArray<FString> AssetLabels;
@@ -257,6 +319,21 @@ namespace
 		if (TracerData.TracerSFX != nullptr)
 		{
 			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(TracerData.TracerSFX)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no tracer assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+
+	FString DescribeTracerCueAssets(const FMABSTracerCueEvent& TracerEvent)
+	{
+		TArray<FString> AssetLabels;
+		if (TracerEvent.VFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(TracerEvent.VFX)));
+		}
+		if (TracerEvent.SFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(TracerEvent.SFX)));
 		}
 
 		return AssetLabels.IsEmpty() ? TEXT("no tracer assets") : FString::Join(AssetLabels, TEXT(", "));
@@ -586,15 +663,24 @@ void UMABSAbilityComponent::MulticastPlayActivationMontage_Implementation(UAnimM
 	PlayActivationMontageLocally(Montage, PlayRate);
 }
 
-void UMABSAbilityComponent::MulticastPlayPresentationCue_Implementation(const FMABSPresentationCueRuntimeData& CueData)
+void UMABSAbilityComponent::ClientPlayPresentationCue_Implementation(const FMABSPresentationCueEvent& CueEvent)
 {
-	PlayPresentationCueLocally(CueData);
+	PlayPresentationCueLocally(CueEvent);
 }
 
-void UMABSAbilityComponent::MulticastSpawnTracerPresentation_Implementation(
-	const FMABSTracerPresentationRuntimeData& TracerData)
+void UMABSAbilityComponent::MulticastPlayPresentationCue_Implementation(const FMABSPresentationCueEvent& CueEvent)
 {
-	SpawnTracerPresentationLocally(TracerData);
+	PlayPresentationCueLocally(CueEvent);
+}
+
+void UMABSAbilityComponent::ClientSpawnTracerPresentation_Implementation(const FMABSTracerCueEvent& TracerEvent)
+{
+	SpawnTracerPresentationLocally(TracerEvent);
+}
+
+void UMABSAbilityComponent::MulticastSpawnTracerPresentation_Implementation(const FMABSTracerCueEvent& TracerEvent)
+{
+	SpawnTracerPresentationLocally(TracerEvent);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(const FGameplayTag& AbilityTag, const bool bNotifyOwningClient)
@@ -1591,6 +1677,23 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 
 	if (AbilityDefinition->DeliveryPresentation.ProjectileTravel.HasAnyPresentation())
 	{
+		const FMABSAbilityDebugEvent CueRoutedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::PresentationCueRouted,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			FString::Printf(
+				TEXT("Routed ProjectileTravel cue with policy %s through the replicated projectile '%s'. Assets: VFX=%s, SFX=%s."),
+				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
+				*GetNameSafe(Projectile),
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX),
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX)));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(CueRoutedEvent);
+		}
+
 		const FMABSAbilityDebugEvent TravelPresentationEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::ProjectileTravelPresentationTriggered,
 			AbilitySpec.AbilityTag,
@@ -1598,8 +1701,9 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 			AbilitySpec.RuntimeState,
 			EMABSAbilityActivationResult::Success,
 			FString::Printf(
-				TEXT("Hooked projectile travel presentation for projectile '%s'. Assets: VFX=%s, SFX=%s."),
+				TEXT("Hooked projectile travel cue for projectile '%s' with policy %s. Assets: VFX=%s, SFX=%s."),
 				*GetNameSafe(Projectile),
+				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
 				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX),
 				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX)));
 		if (bNotifyOwningClient)
@@ -3112,6 +3216,267 @@ bool UMABSAbilityComponent::ResolvePresentationTransform(
 	return true;
 }
 
+bool UMABSAbilityComponent::ResolveCueVisibilityPolicy(
+	const EMABSPresentationCueVisibilityPolicy RequestedPolicy,
+	const EMABSPresentationCuePhase CuePhase,
+	const FGameplayTag& AbilityTag,
+	const FMABSAbilityHandle& AbilityHandle,
+	const EMABSAbilityRuntimeState RuntimeState,
+	const bool bNotifyOwningClient,
+	EMABSPresentationCueVisibilityPolicy& OutResolvedPolicy,
+	FString& OutResolutionMessage)
+{
+	OutResolvedPolicy = RequestedPolicy;
+
+	switch (RequestedPolicy)
+	{
+	case EMABSPresentationCueVisibilityPolicy::OwnerOnly:
+		if (CanRouteCueToOwningClient())
+		{
+			OutResolutionMessage = TEXT("Routing to the owning client only.");
+			return true;
+		}
+
+		OutResolvedPolicy = EMABSPresentationCueVisibilityPolicy::RelevantClients;
+		OutResolutionMessage = FString::Printf(
+			TEXT("%s cue requested OwnerOnly but no owning client was available, so it fell back to RelevantClients."),
+			*GetPresentationCuePhaseLabel(CuePhase));
+		{
+			const FMABSAbilityDebugEvent FallbackEvent = EmitDebugEvent(
+				MABSAbilityComponentEventNames::PresentationCuePolicyFallbackUsed,
+				AbilityTag,
+				AbilityHandle,
+				RuntimeState,
+				EMABSAbilityActivationResult::Success,
+				OutResolutionMessage);
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(FallbackEvent);
+			}
+		}
+		return true;
+
+	case EMABSPresentationCueVisibilityPolicy::LocalOnly:
+		if (GetNetMode() == NM_DedicatedServer)
+		{
+			OutResolutionMessage = FString::Printf(
+				TEXT("%s cue was skipped because LocalOnly cues are not realized on dedicated servers."),
+				*GetPresentationCuePhaseLabel(CuePhase));
+			return false;
+		}
+
+		if (GetNetMode() == NM_Standalone || IsOwningActorLocallyControlled())
+		{
+			OutResolutionMessage = TEXT("Routing locally only.");
+			return true;
+		}
+
+		OutResolutionMessage = FString::Printf(
+			TEXT("%s cue was skipped because the owning actor is not locally controlled on this instance."),
+			*GetPresentationCuePhaseLabel(CuePhase));
+		return false;
+
+	case EMABSPresentationCueVisibilityPolicy::RelevantClients:
+	default:
+		OutResolutionMessage = TEXT("Routing to relevant clients.");
+		return true;
+	}
+}
+
+bool UMABSAbilityComponent::RoutePresentationCue(
+	const FMABSPresentationCueEvent& CueEvent,
+	const FGameplayTag& AbilityTag,
+	const FMABSAbilityHandle& AbilityHandle,
+	const EMABSAbilityRuntimeState RuntimeState,
+	const bool bNotifyOwningClient)
+{
+	if (!CueEvent.HasAnyPresentation())
+	{
+		const FMABSAbilityDebugEvent SkippedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::PresentationCueSkipped,
+			AbilityTag,
+			AbilityHandle,
+			RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			FString::Printf(
+				TEXT("%s cue was skipped because it did not contain any presentation assets."),
+				*GetPresentationCuePhaseLabel(CueEvent.Phase)));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(SkippedEvent);
+		}
+		return false;
+	}
+
+	EMABSPresentationCueVisibilityPolicy ResolvedPolicy = CueEvent.VisibilityPolicy;
+	FString ResolutionMessage;
+	if (!ResolveCueVisibilityPolicy(
+		CueEvent.VisibilityPolicy,
+		CueEvent.Phase,
+		AbilityTag,
+		AbilityHandle,
+		RuntimeState,
+		bNotifyOwningClient,
+		ResolvedPolicy,
+		ResolutionMessage))
+	{
+		const FMABSAbilityDebugEvent SkippedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::PresentationCueSkipped,
+			AbilityTag,
+			AbilityHandle,
+			RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			ResolutionMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(SkippedEvent);
+		}
+		return false;
+	}
+
+	FMABSPresentationCueEvent RoutedCueEvent = CueEvent;
+	RoutedCueEvent.VisibilityPolicy = ResolvedPolicy;
+
+	switch (ResolvedPolicy)
+	{
+	case EMABSPresentationCueVisibilityPolicy::OwnerOnly:
+		if (GetNetMode() == NM_Standalone)
+		{
+			PlayPresentationCueLocally(RoutedCueEvent);
+		}
+		else
+		{
+			ClientPlayPresentationCue(RoutedCueEvent);
+		}
+		break;
+
+	case EMABSPresentationCueVisibilityPolicy::LocalOnly:
+		PlayPresentationCueLocally(RoutedCueEvent);
+		break;
+
+	case EMABSPresentationCueVisibilityPolicy::RelevantClients:
+	default:
+		MulticastPlayPresentationCue(RoutedCueEvent);
+		break;
+	}
+
+	const FMABSAbilityDebugEvent RoutedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::PresentationCueRouted,
+		AbilityTag,
+		AbilityHandle,
+		RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Routed %s cue with policy %s at %s. %s Assets: %s."),
+			*GetPresentationCuePhaseLabel(RoutedCueEvent.Phase),
+			*GetPresentationVisibilityPolicyLabel(RoutedCueEvent.VisibilityPolicy),
+			*FormatVectorForDebug(RoutedCueEvent.Location),
+			*ResolutionMessage,
+			*DescribeCueEventAssets(RoutedCueEvent)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(RoutedEvent);
+	}
+
+	return true;
+}
+
+bool UMABSAbilityComponent::RouteTracerCue(
+	const FMABSTracerCueEvent& TracerEvent,
+	const FGameplayTag& AbilityTag,
+	const FMABSAbilityHandle& AbilityHandle,
+	const EMABSAbilityRuntimeState RuntimeState,
+	const bool bNotifyOwningClient)
+{
+	if (!TracerEvent.HasAnyPresentation())
+	{
+		const FMABSAbilityDebugEvent SkippedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::TracerCueSkipped,
+			AbilityTag,
+			AbilityHandle,
+			RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			TEXT("Tracer cue was skipped because it did not contain any presentation assets."));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(SkippedEvent);
+		}
+		return false;
+	}
+
+	EMABSPresentationCueVisibilityPolicy ResolvedPolicy = TracerEvent.VisibilityPolicy;
+	FString ResolutionMessage;
+	if (!ResolveCueVisibilityPolicy(
+		TracerEvent.VisibilityPolicy,
+		EMABSPresentationCuePhase::Tracer,
+		AbilityTag,
+		AbilityHandle,
+		RuntimeState,
+		bNotifyOwningClient,
+		ResolvedPolicy,
+		ResolutionMessage))
+	{
+		const FMABSAbilityDebugEvent SkippedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::TracerCueSkipped,
+			AbilityTag,
+			AbilityHandle,
+			RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			ResolutionMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(SkippedEvent);
+		}
+		return false;
+	}
+
+	FMABSTracerCueEvent RoutedTracerEvent = TracerEvent;
+	RoutedTracerEvent.VisibilityPolicy = ResolvedPolicy;
+
+	switch (ResolvedPolicy)
+	{
+	case EMABSPresentationCueVisibilityPolicy::OwnerOnly:
+		if (GetNetMode() == NM_Standalone)
+		{
+			SpawnTracerPresentationLocally(RoutedTracerEvent);
+		}
+		else
+		{
+			ClientSpawnTracerPresentation(RoutedTracerEvent);
+		}
+		break;
+
+	case EMABSPresentationCueVisibilityPolicy::LocalOnly:
+		SpawnTracerPresentationLocally(RoutedTracerEvent);
+		break;
+
+	case EMABSPresentationCueVisibilityPolicy::RelevantClients:
+	default:
+		MulticastSpawnTracerPresentation(RoutedTracerEvent);
+		break;
+	}
+
+	const FMABSAbilityDebugEvent RoutedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::TracerCueRouted,
+		AbilityTag,
+		AbilityHandle,
+		RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Routed tracer cue with policy %s from %s to %s. %s Assets: %s."),
+			*GetPresentationVisibilityPolicyLabel(RoutedTracerEvent.VisibilityPolicy),
+			*FormatVectorForDebug(RoutedTracerEvent.TraceStart),
+			*FormatVectorForDebug(RoutedTracerEvent.TraceEnd),
+			*ResolutionMessage,
+			*DescribeTracerCueAssets(RoutedTracerEvent)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(RoutedEvent);
+	}
+
+	return true;
+}
+
 void UMABSAbilityComponent::TriggerStartupPresentation(const FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
 {
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
@@ -3136,16 +3501,24 @@ void UMABSAbilityComponent::TriggerStartupPresentation(const FMABSAbilitySpec& A
 		return;
 	}
 
-	FMABSPresentationCueRuntimeData RuntimeData;
-	RuntimeData.VFX = AbilityDefinition->StartupPresentation.Cue.VFX;
-	RuntimeData.SFX = AbilityDefinition->StartupPresentation.Cue.SFX;
-	RuntimeData.CameraShakeClass = AbilityDefinition->StartupPresentation.Cue.CameraShake.CameraShakeClass;
-	RuntimeData.Location = PresentationTransform.GetLocation();
-	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
-	RuntimeData.CameraShakeInnerRadius = AbilityDefinition->StartupPresentation.Cue.CameraShake.InnerRadius;
-	RuntimeData.CameraShakeOuterRadius = AbilityDefinition->StartupPresentation.Cue.CameraShake.OuterRadius;
-	RuntimeData.CameraShakeFalloff = AbilityDefinition->StartupPresentation.Cue.CameraShake.Falloff;
-	MulticastPlayPresentationCue(RuntimeData);
+	FMABSPresentationCueEvent CueEvent;
+	CueEvent.AbilityTag = AbilitySpec.AbilityTag;
+	CueEvent.AbilityHandle = AbilitySpec.Handle;
+	CueEvent.RuntimeState = AbilitySpec.RuntimeState;
+	CueEvent.Phase = EMABSPresentationCuePhase::Startup;
+	CueEvent.VisibilityPolicy = AbilityDefinition->StartupPresentation.Cue.VisibilityPolicy;
+	CueEvent.VFX = AbilityDefinition->StartupPresentation.Cue.VFX;
+	CueEvent.SFX = AbilityDefinition->StartupPresentation.Cue.SFX;
+	CueEvent.CameraShakeClass = AbilityDefinition->StartupPresentation.Cue.CameraShake.CameraShakeClass;
+	CueEvent.Location = PresentationTransform.GetLocation();
+	CueEvent.Rotation = PresentationTransform.GetRotation().Rotator();
+	CueEvent.CameraShakeInnerRadius = AbilityDefinition->StartupPresentation.Cue.CameraShake.InnerRadius;
+	CueEvent.CameraShakeOuterRadius = AbilityDefinition->StartupPresentation.Cue.CameraShake.OuterRadius;
+	CueEvent.CameraShakeFalloff = AbilityDefinition->StartupPresentation.Cue.CameraShake.Falloff;
+	if (!RoutePresentationCue(CueEvent, AbilitySpec.AbilityTag, AbilitySpec.Handle, AbilitySpec.RuntimeState, bNotifyOwningClient))
+	{
+		return;
+	}
 
 	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::StartupPresentationTriggered,
@@ -3154,9 +3527,10 @@ void UMABSAbilityComponent::TriggerStartupPresentation(const FMABSAbilitySpec& A
 		AbilitySpec.RuntimeState,
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
-			TEXT("Triggered startup presentation for ability '%s' at %s using %s. Assets: %s."),
+			TEXT("Triggered startup presentation cue for ability '%s' with policy %s at %s using %s. Assets: %s."),
 			*GetAbilityLabel(AbilityDefinition),
-			*FormatVectorForDebug(RuntimeData.Location),
+			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*FormatVectorForDebug(CueEvent.Location),
 			*OriginDescription,
 			*DescribeCueAssets(AbilityDefinition->StartupPresentation.Cue)));
 	if (bNotifyOwningClient)
@@ -3192,16 +3566,24 @@ void UMABSAbilityComponent::TriggerDeliveryPresentation(
 		return;
 	}
 
-	FMABSPresentationCueRuntimeData RuntimeData;
-	RuntimeData.VFX = AbilityDefinition->DeliveryPresentation.Cue.VFX;
-	RuntimeData.SFX = AbilityDefinition->DeliveryPresentation.Cue.SFX;
-	RuntimeData.CameraShakeClass = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.CameraShakeClass;
-	RuntimeData.Location = PresentationTransform.GetLocation();
-	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
-	RuntimeData.CameraShakeInnerRadius = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.InnerRadius;
-	RuntimeData.CameraShakeOuterRadius = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.OuterRadius;
-	RuntimeData.CameraShakeFalloff = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.Falloff;
-	MulticastPlayPresentationCue(RuntimeData);
+	FMABSPresentationCueEvent CueEvent;
+	CueEvent.AbilityTag = AbilitySpec.AbilityTag;
+	CueEvent.AbilityHandle = AbilitySpec.Handle;
+	CueEvent.RuntimeState = AbilitySpec.RuntimeState;
+	CueEvent.Phase = EMABSPresentationCuePhase::Delivery;
+	CueEvent.VisibilityPolicy = AbilityDefinition->DeliveryPresentation.Cue.VisibilityPolicy;
+	CueEvent.VFX = AbilityDefinition->DeliveryPresentation.Cue.VFX;
+	CueEvent.SFX = AbilityDefinition->DeliveryPresentation.Cue.SFX;
+	CueEvent.CameraShakeClass = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.CameraShakeClass;
+	CueEvent.Location = PresentationTransform.GetLocation();
+	CueEvent.Rotation = PresentationTransform.GetRotation().Rotator();
+	CueEvent.CameraShakeInnerRadius = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.InnerRadius;
+	CueEvent.CameraShakeOuterRadius = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.OuterRadius;
+	CueEvent.CameraShakeFalloff = AbilityDefinition->DeliveryPresentation.Cue.CameraShake.Falloff;
+	if (!RoutePresentationCue(CueEvent, AbilitySpec.AbilityTag, AbilitySpec.Handle, AbilitySpec.RuntimeState, bNotifyOwningClient))
+	{
+		return;
+	}
 
 	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::DeliveryPresentationTriggered,
@@ -3210,9 +3592,10 @@ void UMABSAbilityComponent::TriggerDeliveryPresentation(
 		AbilitySpec.RuntimeState,
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
-			TEXT("Triggered delivery presentation for %s at %s using %s. Assets: %s."),
+			TEXT("Triggered delivery presentation cue for %s with policy %s at %s using %s. Assets: %s."),
 			*GetDeliveryModeLabel(DeliveryMode),
-			*FormatVectorForDebug(RuntimeData.Location),
+			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*FormatVectorForDebug(CueEvent.Location),
 			*OriginDescription,
 			*DescribeCueAssets(AbilityDefinition->DeliveryPresentation.Cue)));
 	if (bNotifyOwningClient)
@@ -3249,27 +3632,35 @@ void UMABSAbilityComponent::TriggerTracerPresentation(
 		return;
 	}
 
-	FMABSTracerPresentationRuntimeData RuntimeData;
-	RuntimeData.VFX = AbilityDefinition->DeliveryPresentation.HitTraceTracer.TracerVFX;
-	RuntimeData.SFX = AbilityDefinition->DeliveryPresentation.HitTraceTracer.TracerSFX;
-	RuntimeData.TraceStart = TraceStart;
-	RuntimeData.TraceEnd = TraceEnd;
-	MulticastSpawnTracerPresentation(RuntimeData);
+	FMABSTracerCueEvent TracerEvent;
+	TracerEvent.AbilityTag = AbilitySpec.AbilityTag;
+	TracerEvent.AbilityHandle = AbilitySpec.Handle;
+	TracerEvent.RuntimeState = AbilitySpec.RuntimeState;
+	TracerEvent.VisibilityPolicy = AbilityDefinition->DeliveryPresentation.HitTraceTracer.VisibilityPolicy;
+	TracerEvent.VFX = AbilityDefinition->DeliveryPresentation.HitTraceTracer.TracerVFX;
+	TracerEvent.SFX = AbilityDefinition->DeliveryPresentation.HitTraceTracer.TracerSFX;
+	TracerEvent.TraceStart = TraceStart;
+	TracerEvent.TraceEnd = TraceEnd;
+	if (!RouteTracerCue(TracerEvent, AbilitySpec.AbilityTag, AbilitySpec.Handle, AbilitySpec.RuntimeState, bNotifyOwningClient))
+	{
+		return;
+	}
 
-	const FMABSAbilityDebugEvent TracerEvent = EmitDebugEvent(
+	const FMABSAbilityDebugEvent TracerSpawnedEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::TracerSpawned,
 		AbilitySpec.AbilityTag,
 		AbilitySpec.Handle,
 		AbilitySpec.RuntimeState,
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
-			TEXT("Spawned tracer presentation from %s to %s. Assets: %s."),
+			TEXT("Spawned tracer cue with policy %s from %s to %s. Assets: %s."),
+			*GetPresentationVisibilityPolicyLabel(TracerEvent.VisibilityPolicy),
 			*FormatVectorForDebug(TraceStart),
 			*FormatVectorForDebug(TraceEnd),
 			*DescribeTracerAssets(AbilityDefinition->DeliveryPresentation.HitTraceTracer)));
 	if (bNotifyOwningClient)
 	{
-		EmitDebugEventToOwningClient(TracerEvent);
+		EmitDebugEventToOwningClient(TracerSpawnedEvent);
 	}
 }
 
@@ -3308,16 +3699,24 @@ void UMABSAbilityComponent::TriggerImpactPresentation(
 	PresentationTransform.AddToTranslation(
 		PresentationTransform.GetRotation().RotateVector(AbilityDefinition->ImpactPresentation.Cue.LocationOffset));
 
-	FMABSPresentationCueRuntimeData RuntimeData;
-	RuntimeData.VFX = AbilityDefinition->ImpactPresentation.Cue.VFX;
-	RuntimeData.SFX = AbilityDefinition->ImpactPresentation.Cue.SFX;
-	RuntimeData.CameraShakeClass = AbilityDefinition->ImpactPresentation.Cue.CameraShake.CameraShakeClass;
-	RuntimeData.Location = PresentationTransform.GetLocation();
-	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
-	RuntimeData.CameraShakeInnerRadius = AbilityDefinition->ImpactPresentation.Cue.CameraShake.InnerRadius;
-	RuntimeData.CameraShakeOuterRadius = AbilityDefinition->ImpactPresentation.Cue.CameraShake.OuterRadius;
-	RuntimeData.CameraShakeFalloff = AbilityDefinition->ImpactPresentation.Cue.CameraShake.Falloff;
-	MulticastPlayPresentationCue(RuntimeData);
+	FMABSPresentationCueEvent CueEvent;
+	CueEvent.AbilityTag = AbilitySpec.AbilityTag;
+	CueEvent.AbilityHandle = AbilitySpec.Handle;
+	CueEvent.RuntimeState = AbilitySpec.RuntimeState;
+	CueEvent.Phase = EMABSPresentationCuePhase::Impact;
+	CueEvent.VisibilityPolicy = AbilityDefinition->ImpactPresentation.Cue.VisibilityPolicy;
+	CueEvent.VFX = AbilityDefinition->ImpactPresentation.Cue.VFX;
+	CueEvent.SFX = AbilityDefinition->ImpactPresentation.Cue.SFX;
+	CueEvent.CameraShakeClass = AbilityDefinition->ImpactPresentation.Cue.CameraShake.CameraShakeClass;
+	CueEvent.Location = PresentationTransform.GetLocation();
+	CueEvent.Rotation = PresentationTransform.GetRotation().Rotator();
+	CueEvent.CameraShakeInnerRadius = AbilityDefinition->ImpactPresentation.Cue.CameraShake.InnerRadius;
+	CueEvent.CameraShakeOuterRadius = AbilityDefinition->ImpactPresentation.Cue.CameraShake.OuterRadius;
+	CueEvent.CameraShakeFalloff = AbilityDefinition->ImpactPresentation.Cue.CameraShake.Falloff;
+	if (!RoutePresentationCue(CueEvent, AbilitySpec.AbilityTag, AbilitySpec.Handle, AbilitySpec.RuntimeState, bNotifyOwningClient))
+	{
+		return;
+	}
 
 	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::ImpactPresentationTriggered,
@@ -3326,10 +3725,11 @@ void UMABSAbilityComponent::TriggerImpactPresentation(
 		AbilitySpec.RuntimeState,
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
-			TEXT("Triggered impact presentation for %s on '%s' at %s. Assets: %s."),
+			TEXT("Triggered impact presentation cue for %s on '%s' with policy %s at %s. Assets: %s."),
 			*GetDeliveryModeLabel(DeliveryMode),
 			*GetNameSafe(ResolvedTarget.TargetActor),
-			*FormatVectorForDebug(RuntimeData.Location),
+			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*FormatVectorForDebug(CueEvent.Location),
 			*DescribeCueAssets(AbilityDefinition->ImpactPresentation.Cue)));
 	if (bNotifyOwningClient)
 	{
@@ -3354,16 +3754,24 @@ void UMABSAbilityComponent::TriggerProjectileImpactPresentation(
 	PresentationTransform.AddToTranslation(
 		PresentationTransform.GetRotation().RotateVector(AbilityDefinition.ImpactPresentation.Cue.LocationOffset));
 
-	FMABSPresentationCueRuntimeData RuntimeData;
-	RuntimeData.VFX = AbilityDefinition.ImpactPresentation.Cue.VFX;
-	RuntimeData.SFX = AbilityDefinition.ImpactPresentation.Cue.SFX;
-	RuntimeData.CameraShakeClass = AbilityDefinition.ImpactPresentation.Cue.CameraShake.CameraShakeClass;
-	RuntimeData.Location = PresentationTransform.GetLocation();
-	RuntimeData.Rotation = PresentationTransform.GetRotation().Rotator();
-	RuntimeData.CameraShakeInnerRadius = AbilityDefinition.ImpactPresentation.Cue.CameraShake.InnerRadius;
-	RuntimeData.CameraShakeOuterRadius = AbilityDefinition.ImpactPresentation.Cue.CameraShake.OuterRadius;
-	RuntimeData.CameraShakeFalloff = AbilityDefinition.ImpactPresentation.Cue.CameraShake.Falloff;
-	MulticastPlayPresentationCue(RuntimeData);
+	FMABSPresentationCueEvent CueEvent;
+	CueEvent.AbilityTag = AbilityTag;
+	CueEvent.AbilityHandle = AbilityHandle;
+	CueEvent.RuntimeState = EMABSAbilityRuntimeState::Idle;
+	CueEvent.Phase = EMABSPresentationCuePhase::Impact;
+	CueEvent.VisibilityPolicy = AbilityDefinition.ImpactPresentation.Cue.VisibilityPolicy;
+	CueEvent.VFX = AbilityDefinition.ImpactPresentation.Cue.VFX;
+	CueEvent.SFX = AbilityDefinition.ImpactPresentation.Cue.SFX;
+	CueEvent.CameraShakeClass = AbilityDefinition.ImpactPresentation.Cue.CameraShake.CameraShakeClass;
+	CueEvent.Location = PresentationTransform.GetLocation();
+	CueEvent.Rotation = PresentationTransform.GetRotation().Rotator();
+	CueEvent.CameraShakeInnerRadius = AbilityDefinition.ImpactPresentation.Cue.CameraShake.InnerRadius;
+	CueEvent.CameraShakeOuterRadius = AbilityDefinition.ImpactPresentation.Cue.CameraShake.OuterRadius;
+	CueEvent.CameraShakeFalloff = AbilityDefinition.ImpactPresentation.Cue.CameraShake.Falloff;
+	if (!RoutePresentationCue(CueEvent, AbilityTag, AbilityHandle, EMABSAbilityRuntimeState::Idle, true))
+	{
+		return;
+	}
 
 	const FMABSAbilityDebugEvent PresentationEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::ImpactPresentationTriggered,
@@ -3372,84 +3780,217 @@ void UMABSAbilityComponent::TriggerProjectileImpactPresentation(
 		EMABSAbilityRuntimeState::Idle,
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
-			TEXT("Triggered projectile impact presentation on '%s' at %s. Assets: %s."),
+			TEXT("Triggered projectile impact presentation cue on '%s' with policy %s at %s. Assets: %s."),
 			*GetNameSafe(HitActor),
-			*FormatVectorForDebug(RuntimeData.Location),
+			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*FormatVectorForDebug(CueEvent.Location),
 			*DescribeCueAssets(AbilityDefinition.ImpactPresentation.Cue)));
 	EmitDebugEventToOwningClient(PresentationEvent);
 }
 
-void UMABSAbilityComponent::PlayPresentationCueLocally(const FMABSPresentationCueRuntimeData& CueData) const
+bool UMABSAbilityComponent::CanRouteCueToOwningClient() const
+{
+	if (GetNetMode() == NM_Standalone)
+	{
+		return true;
+	}
+
+	AActor* const Owner = GetOwner();
+	return Owner != nullptr && Owner->GetNetOwningPlayer() != nullptr;
+}
+
+bool UMABSAbilityComponent::IsOwningActorLocallyControlled() const
+{
+	if (GetNetMode() == NM_Standalone)
+	{
+		return true;
+	}
+
+	const AActor* const Owner = GetOwner();
+	if (Owner == nullptr)
+	{
+		return false;
+	}
+
+	if (const APawn* const OwnerPawn = Cast<APawn>(Owner))
+	{
+		return OwnerPawn->IsLocallyControlled();
+	}
+
+	if (const AController* const OwnerController = Cast<AController>(Owner))
+	{
+		return OwnerController->IsLocalController();
+	}
+
+	if (const APawn* const InstigatorPawn = Owner->GetInstigator())
+	{
+		return InstigatorPawn->IsLocallyControlled();
+	}
+
+	const AActor* const OuterOwner = Owner->GetOwner();
+	if (const APawn* const OuterOwnerPawn = Cast<APawn>(OuterOwner))
+	{
+		return OuterOwnerPawn->IsLocallyControlled();
+	}
+
+	if (const AController* const OuterOwnerController = Cast<AController>(OuterOwner))
+	{
+		return OuterOwnerController->IsLocalController();
+	}
+
+	return false;
+}
+
+UNiagaraComponent* UMABSAbilityComponent::AcquireReusableNiagaraComponent(
+	UNiagaraSystem* NiagaraSystem,
+	const FVector& Location,
+	const FRotator& Rotation,
+	TMap<TObjectPtr<UNiagaraSystem>, TArray<TWeakObjectPtr<UNiagaraComponent>>>& ComponentPool)
+{
+	if (NiagaraSystem == nullptr)
+	{
+		return nullptr;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return nullptr;
+	}
+
+	TArray<TWeakObjectPtr<UNiagaraComponent>>& PooledComponents = ComponentPool.FindOrAdd(NiagaraSystem);
+	UNiagaraComponent* ReusableComponent = nullptr;
+	for (int32 ComponentIndex = PooledComponents.Num() - 1; ComponentIndex >= 0; --ComponentIndex)
+	{
+		if (!PooledComponents[ComponentIndex].IsValid())
+		{
+			PooledComponents.RemoveAtSwap(ComponentIndex);
+			continue;
+		}
+
+		UNiagaraComponent* const CandidateComponent = PooledComponents[ComponentIndex].Get();
+		if (CandidateComponent != nullptr && !CandidateComponent->IsActive())
+		{
+			ReusableComponent = CandidateComponent;
+			break;
+		}
+	}
+
+	if (ReusableComponent == nullptr)
+	{
+		ReusableComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			World,
+			NiagaraSystem,
+			Location,
+			Rotation,
+			FVector(1.0f),
+			false,
+			false);
+		if (ReusableComponent == nullptr)
+		{
+			return nullptr;
+		}
+
+		ReusableComponent->SetAutoDestroy(false);
+		PooledComponents.Add(ReusableComponent);
+	}
+
+	ReusableComponent->DeactivateImmediate();
+	ReusableComponent->SetAsset(NiagaraSystem);
+	ReusableComponent->SetWorldLocationAndRotation(Location, Rotation);
+	ReusableComponent->SetVisibility(true, true);
+	return ReusableComponent;
+}
+
+void UMABSAbilityComponent::PlayPresentationCueLocally(const FMABSPresentationCueEvent& CueEvent)
 {
 	if (GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
-	UWorld* const World = GetWorld();
-	if (World == nullptr)
+	if (CueEvent.VFX != nullptr)
 	{
-		return;
+		if (UNiagaraComponent* const CueComponent = AcquireReusableNiagaraComponent(
+			CueEvent.VFX,
+			CueEvent.Location,
+			CueEvent.Rotation,
+			ReusableCueVFXPool))
+		{
+			CueComponent->Activate(true);
+		}
 	}
 
-	if (CueData.VFX != nullptr)
+	if (CueEvent.SFX != nullptr)
 	{
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, CueData.VFX, CueData.Location, CueData.Rotation);
+		UGameplayStatics::SpawnSoundAtLocation(this, CueEvent.SFX, CueEvent.Location, CueEvent.Rotation);
 	}
 
-	if (CueData.SFX != nullptr)
-	{
-		UGameplayStatics::SpawnSoundAtLocation(this, CueData.SFX, CueData.Location, CueData.Rotation);
-	}
-
-	if (CueData.CameraShakeClass != nullptr)
+	if (CueEvent.CameraShakeClass != nullptr)
 	{
 		UGameplayStatics::PlayWorldCameraShake(
 			this,
-			CueData.CameraShakeClass,
-			CueData.Location,
-			CueData.CameraShakeInnerRadius,
-			FMath::Max(CueData.CameraShakeInnerRadius, CueData.CameraShakeOuterRadius),
-			CueData.CameraShakeFalloff);
+			CueEvent.CameraShakeClass,
+			CueEvent.Location,
+			CueEvent.CameraShakeInnerRadius,
+			FMath::Max(CueEvent.CameraShakeInnerRadius, CueEvent.CameraShakeOuterRadius),
+			CueEvent.CameraShakeFalloff);
 	}
+
+	EmitDebugEvent(
+		MABSAbilityComponentEventNames::PresentationCueRealized,
+		CueEvent.AbilityTag,
+		CueEvent.AbilityHandle,
+		CueEvent.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Realized %s cue locally with policy %s at %s. Assets: %s."),
+			*GetPresentationCuePhaseLabel(CueEvent.Phase),
+			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*FormatVectorForDebug(CueEvent.Location),
+			*DescribeCueEventAssets(CueEvent)));
 }
 
-void UMABSAbilityComponent::SpawnTracerPresentationLocally(const FMABSTracerPresentationRuntimeData& TracerData) const
+void UMABSAbilityComponent::SpawnTracerPresentationLocally(const FMABSTracerCueEvent& TracerEvent)
 {
 	if (GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
-	UWorld* const World = GetWorld();
-	if (World == nullptr)
+	const FRotator TracerRotation = (TracerEvent.TraceEnd - TracerEvent.TraceStart).Rotation();
+	if (TracerEvent.VFX != nullptr)
 	{
-		return;
-	}
-
-	const FRotator TracerRotation = (TracerData.TraceEnd - TracerData.TraceStart).Rotation();
-	if (TracerData.VFX != nullptr)
-	{
-		if (UNiagaraComponent* const TracerComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-			World,
-			TracerData.VFX,
-			TracerData.TraceStart,
+		if (UNiagaraComponent* const TracerComponent = AcquireReusableNiagaraComponent(
+			TracerEvent.VFX,
+			TracerEvent.TraceStart,
 			TracerRotation,
-			FVector(1.0f),
-			true,
-			false))
+			ReusableTracerVFXPool))
 		{
-			TracerComponent->SetVectorParameter(NiagaraTracerTraceStartParameter, TracerData.TraceStart);
-			TracerComponent->SetVectorParameter(NiagaraTracerTraceEndParameter, TracerData.TraceEnd);
-			TracerComponent->SetVectorParameter(NiagaraTracerImpactPointParameter, TracerData.TraceEnd);
+			TracerComponent->SetVectorParameter(NiagaraTracerTraceStartParameter, TracerEvent.TraceStart);
+			TracerComponent->SetVectorParameter(NiagaraTracerTraceEndParameter, TracerEvent.TraceEnd);
+			TracerComponent->SetVectorParameter(NiagaraTracerImpactPointParameter, TracerEvent.TraceEnd);
 			TracerComponent->Activate(true);
 		}
 	}
 
-	if (TracerData.SFX != nullptr)
+	if (TracerEvent.SFX != nullptr)
 	{
-		UGameplayStatics::SpawnSoundAtLocation(this, TracerData.SFX, TracerData.TraceStart, TracerRotation);
+		UGameplayStatics::SpawnSoundAtLocation(this, TracerEvent.SFX, TracerEvent.TraceStart, TracerRotation);
 	}
+
+	EmitDebugEvent(
+		MABSAbilityComponentEventNames::TracerCueRealized,
+		TracerEvent.AbilityTag,
+		TracerEvent.AbilityHandle,
+		TracerEvent.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Realized tracer cue locally with policy %s from %s to %s. Assets: %s."),
+			*GetPresentationVisibilityPolicyLabel(TracerEvent.VisibilityPolicy),
+			*FormatVectorForDebug(TracerEvent.TraceStart),
+			*FormatVectorForDebug(TracerEvent.TraceEnd),
+			*DescribeTracerCueAssets(TracerEvent)));
 }
 
 bool UMABSAbilityComponent::ValidateTargetActorForAbility(

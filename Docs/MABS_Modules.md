@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the current module layout for MABS after Phase 6 presentation support.
+This document explains the current Phase 6.5 module layout for MABS after lightweight presentation cue routing was added.
 
 ## Why it exists
 
-Phase 6 adds authored presentation structs and runtime cosmetic routing, but the module split still keeps authored data, runtime execution, and debug display separate and readable.
+Phase 6.5 adds new shared cue types and routing behavior, but the module split still keeps authored data, runtime execution, and debug display separate and readable.
 
 ## Module map
 
@@ -19,7 +19,12 @@ Owns:
 * authored timing fields
 * authored socket fields
 * authored montage references
-* authored presentation structs and fields
+* authored presentation structs and fields, including Niagara VFX references
+* `EMABSPresentationCueVisibilityPolicy`
+* `EMABSPresentationCuePhase`
+* `FMABSPresentationCueEvent`
+* `FMABSTracerCueEvent`
+* `FMABSProjectileTravelCueEvent`
 * shared debug structs
 
 ### `MABSGameplay`
@@ -32,11 +37,14 @@ Owns:
 * socket transform resolution
 * montage request hooks
 * authority-side delivery execution
-* startup, delivery, tracer, and impact presentation triggers
-* projectile travel presentation hookup
+* cue routing helpers for startup, delivery, tracer, travel, and impact
+* owner-only, local-only, and relevant-client cue handling
+* local cue realization helpers
+* pooling-friendly Niagara reuse for repeated world cues and tracers
+* projectile travel cue hookup on the replicated projectile actor
 * instant effects
 * cooldown and cost integration
-* replication and multicast cosmetic routing
+* replication and cosmetic routing
 
 ### `MABSDebug`
 
@@ -44,7 +52,7 @@ Owns:
 
 * runtime-safe debug formatting
 * the HUD overlay
-* display of timing state, presentation events, recent delivery results, and the latest trace snapshot
+* display of timing state, trace state, and recent cue-routing events
 
 ### `MABSEditor`
 
@@ -61,3 +69,5 @@ Current dependency flow is:
 * `MABSGameplay` depends on `MABSCore`
 * `MABSDebug` depends on `MABSCore` and consumes `MABSGameplay` runtime data
 * `MABSEditor` may depend on runtime modules
+
+Runtime presentation still depends on the engine `Niagara` module for authored VFX types and local system realization.

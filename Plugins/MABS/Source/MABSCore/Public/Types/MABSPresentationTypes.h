@@ -4,10 +4,29 @@
 
 #include "CoreMinimal.h"
 #include "Camera/CameraShakeBase.h"
+#include "MABSAbilityTypes.h"
 #include "MABSPresentationTypes.generated.h"
 
 class UNiagaraSystem;
 class USoundBase;
+
+UENUM(BlueprintType)
+enum class EMABSPresentationCueVisibilityPolicy : uint8
+{
+	RelevantClients UMETA(DisplayName="Relevant Clients"),
+	OwnerOnly UMETA(DisplayName="Owner Only"),
+	LocalOnly UMETA(DisplayName="Local Only")
+};
+
+UENUM(BlueprintType)
+enum class EMABSPresentationCuePhase : uint8
+{
+	Startup UMETA(DisplayName="Startup"),
+	Delivery UMETA(DisplayName="Delivery"),
+	Tracer UMETA(DisplayName="Tracer"),
+	ProjectileTravel UMETA(DisplayName="Projectile Travel"),
+	Impact UMETA(DisplayName="Impact")
+};
 
 USTRUCT(BlueprintType)
 struct MABSCORE_API FMABSPresentationCameraShakeData
@@ -44,6 +63,9 @@ struct MABSCORE_API FMABSPresentationCueData
 	TObjectPtr<USoundBase> SFX = nullptr;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
+	EMABSPresentationCueVisibilityPolicy VisibilityPolicy = EMABSPresentationCueVisibilityPolicy::RelevantClients;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
 	FMABSPresentationCameraShakeData CameraShake;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
@@ -72,6 +94,9 @@ struct MABSCORE_API FMABSHitTraceTracerPresentationData
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
 	TObjectPtr<USoundBase> TracerSFX = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
+	EMABSPresentationCueVisibilityPolicy VisibilityPolicy = EMABSPresentationCueVisibilityPolicy::RelevantClients;
+
 	bool HasAnyPresentation() const
 	{
 		return TracerVFX != nullptr || TracerSFX != nullptr;
@@ -89,9 +114,126 @@ struct MABSCORE_API FMABSProjectileTravelPresentationData
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
 	TObjectPtr<USoundBase> TravelSFX = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
+	EMABSPresentationCueVisibilityPolicy VisibilityPolicy = EMABSPresentationCueVisibilityPolicy::RelevantClients;
+
 	bool HasAnyPresentation() const
 	{
 		return TravelVFX != nullptr || TravelSFX != nullptr;
+	}
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSPresentationCueEvent
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FGameplayTag AbilityTag;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FMABSAbilityHandle AbilityHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	EMABSAbilityRuntimeState RuntimeState = EMABSAbilityRuntimeState::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	EMABSPresentationCuePhase Phase = EMABSPresentationCuePhase::Startup;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	EMABSPresentationCueVisibilityPolicy VisibilityPolicy = EMABSPresentationCueVisibilityPolicy::RelevantClients;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	TObjectPtr<UNiagaraSystem> VFX = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	TObjectPtr<USoundBase> SFX = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	TSubclassOf<UCameraShakeBase> CameraShakeClass = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FRotator Rotation = FRotator::ZeroRotator;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	float CameraShakeInnerRadius = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	float CameraShakeOuterRadius = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	float CameraShakeFalloff = 1.0f;
+
+	bool HasAnyPresentation() const
+	{
+		return VFX != nullptr || SFX != nullptr || CameraShakeClass != nullptr;
+	}
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSTracerCueEvent
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FGameplayTag AbilityTag;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FMABSAbilityHandle AbilityHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	EMABSAbilityRuntimeState RuntimeState = EMABSAbilityRuntimeState::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	EMABSPresentationCueVisibilityPolicy VisibilityPolicy = EMABSPresentationCueVisibilityPolicy::RelevantClients;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	TObjectPtr<UNiagaraSystem> VFX = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	TObjectPtr<USoundBase> SFX = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FVector TraceStart = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FVector TraceEnd = FVector::ZeroVector;
+
+	bool HasAnyPresentation() const
+	{
+		return VFX != nullptr || SFX != nullptr;
+	}
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSProjectileTravelCueEvent
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FGameplayTag AbilityTag;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	FMABSAbilityHandle AbilityHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	EMABSAbilityRuntimeState RuntimeState = EMABSAbilityRuntimeState::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	EMABSPresentationCueVisibilityPolicy VisibilityPolicy = EMABSPresentationCueVisibilityPolicy::RelevantClients;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	TObjectPtr<UNiagaraSystem> VFX = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Presentation")
+	TObjectPtr<USoundBase> SFX = nullptr;
+
+	bool HasAnyPresentation() const
+	{
+		return VFX != nullptr || SFX != nullptr;
 	}
 };
 

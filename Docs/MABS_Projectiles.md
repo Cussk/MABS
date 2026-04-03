@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the built-in projectile path in MABS.
+This document explains the built-in projectile path in MABS after Phase 6.5 cue routing.
 
 ## Why it exists
 
-Projectiles are one of the most common expected delivery modes for practical combat abilities, and Phase 6 now gives them authored spawn, travel, and impact presentation coverage.
+Projectiles are one of the most common expected delivery modes for practical combat abilities. Phase 6 added spawn, travel, and impact presentation. Phase 6.5 keeps that feature set, but routes projectile travel through the same lightweight cue model used by the rest of the presentation layer.
 
 ## Built-in runtime type
 
@@ -16,7 +16,9 @@ Projectiles are one of the most common expected delivery modes for practical com
 * stores replicated source ability context
 * routes impact handling back through `UMABSAbilityComponent`
 * applies the authored instant effect on a valid impact
-* locally activates authored projectile travel VFX and SFX from the replicated projectile actor
+* builds a lightweight projectile-travel cue event from authored data
+* evaluates travel cue visibility locally on each instance
+* activates authored projectile travel Niagara VFX and SFX when the cue policy allows it
 
 ## Authored fields
 
@@ -28,31 +30,35 @@ Use:
 * `ProjectileSpawnOffset`
 * `DeliveryPresentation.Cue`
 * `DeliveryPresentation.ProjectileTravel`
+* `DeliveryPresentation.ProjectileTravel.VisibilityPolicy`
 * `ImpactPresentation.Cue`
 
 `ProjectileActorClass` must derive from `AMABSProjectileBase`.
 
-## Commit behavior
+## Runtime behavior
 
-Projectile abilities use a spawn-success model:
+Projectile abilities still work the same way for gameplay:
 
-* if the projectile spawns, the ability commits
-* cost is spent and cooldown starts on spawn success
+* the server spawns the projectile
+* successful spawn commits the ability
 * the effect applies later on authoritative impact
 
-Projectile presentation behavior is:
+Presentation behavior is now:
 
-* delivery cue plays at projectile spawn time
-* travel presentation starts from the projectile actor itself
-* impact presentation plays on authoritative hit
+* delivery cue routes at projectile spawn time
+* projectile travel builds a `FMABSProjectileTravelCueEvent`
+* the replicated projectile realizes travel presentation locally only when the authored visibility policy allows it
+* impact presentation routes through the same cue helper path used by other presentation phases
 
 ## Debug events
 
 Use:
 
-* `DeliveryPresentationTriggered`
 * `ProjectileSpawned`
 * `ProjectileTravelPresentationTriggered`
+* `PresentationCueRouted`
+* `PresentationCueSkipped`
+* `PresentationCueRealized`
 * `ProjectileImpact`
 * `ImpactPresentationTriggered`
 
@@ -62,6 +68,7 @@ Example fireball:
 
 * `ProjectileActorClass = BP_MABS_Fireball`
 * `ProjectileSpawnSocketName = hand_r`
-* `DeliveryPresentation.Cue.VFX = P_FireballCast`
-* `DeliveryPresentation.ProjectileTravel.TravelVFX = P_FireballTrail`
-* `ImpactPresentation.Cue.VFX = P_FireballImpact`
+* `DeliveryPresentation.Cue.VFX = NS_FireballCast`
+* `DeliveryPresentation.ProjectileTravel.TravelVFX = NS_FireballTrail`
+* `DeliveryPresentation.ProjectileTravel.VisibilityPolicy = RelevantClients`
+* `ImpactPresentation.Cue.VFX = NS_FireballImpact`

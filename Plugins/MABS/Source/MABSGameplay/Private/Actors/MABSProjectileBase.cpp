@@ -5,11 +5,45 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/SphereComponent.h"
 #include "Data/MABSAbilityDefinition.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "NiagaraFunctionLibrary.h"
+
+namespace
+{
+	FString GetPresentationVisibilityPolicyLabel(const EMABSPresentationCueVisibilityPolicy VisibilityPolicy)
+	{
+		switch (VisibilityPolicy)
+		{
+		case EMABSPresentationCueVisibilityPolicy::OwnerOnly:
+			return TEXT("OwnerOnly");
+
+		case EMABSPresentationCueVisibilityPolicy::LocalOnly:
+			return TEXT("LocalOnly");
+
+		default:
+			return TEXT("RelevantClients");
+		}
+	}
+
+	FString DescribeProjectileTravelCueAssets(const FMABSProjectileTravelCueEvent& CueEvent)
+	{
+		TArray<FString> AssetLabels;
+		if (CueEvent.VFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(CueEvent.VFX)));
+		}
+		if (CueEvent.SFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(CueEvent.SFX)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no presentation assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+}
 
 AMABSProjectileBase::AMABSProjectileBase()
 {
@@ -94,6 +128,11 @@ void AMABSProjectileBase::InitializeProjectile(
 	{
 		SetInstigator(InSourceActor->GetInstigator());
 	}
+}
+
+void AMABSProjectileBase::OnRep_SourceActor()
+{
+	ActivateTravelPresentation();
 }
 
 void AMABSProjectileBase::OnRep_SourceAbilityDefinition()
@@ -194,28 +233,116 @@ UMABSAbilityComponent* AMABSProjectileBase::ResolveOwningAbilityComponent() cons
 	return SourceActor != nullptr ? SourceActor->FindComponentByClass<UMABSAbilityComponent>() : nullptr;
 }
 
-void AMABSProjectileBase::ActivateTravelPresentation()
+bool AMABSProjectileBase::BuildProjectileTravelCueEvent(FMABSProjectileTravelCueEvent& OutCueEvent) const
 {
-	if (bTravelPresentationActivated || SourceAbilityDefinition == nullptr)
+	if (SourceAbilityDefinition == nullptr || !SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.HasAnyPresentation())
 	{
-		return;
+		return false;
 	}
 
-	bTravelPresentationActivated = true;
+	OutCueEvent.AbilityTag = SourceAbilityTag;
+	OutCueEvent.AbilityHandle = SourceAbilityHandle;
+	OutCueEvent.RuntimeState = EMABSAbilityRuntimeState::Active;
+	OutCueEvent.VisibilityPolicy = SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy;
+	OutCueEvent.VFX = SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX;
+	OutCueEvent.SFX = SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX;
+	return true;
+}
+
+bool AMABSProjectileBase::ShouldRealizeTravelCueLocally(
+	const FMABSProjectileTravelCueEvent& CueEvent,
+	bool& bOutShouldRetry,
+	FString& OutSkipReason) const
+{
+	bOutShouldRetry = false;
+
 	if (GetNetMode() == NM_DedicatedServer)
 	{
-		return;
+		OutSkipReason = TEXT("Projectile travel cue was skipped because dedicated servers do not realize cosmetic cues.");
+		return false;
 	}
 
+	switch (CueEvent.VisibilityPolicy)
+	{
+	case EMABSPresentationCueVisibilityPolicy::OwnerOnly:
+	case EMABSPresentationCueVisibilityPolicy::LocalOnly:
+		if (GetNetMode() == NM_Standalone)
+		{
+			return true;
+		}
+
+		if (SourceActor == nullptr)
+		{
+			bOutShouldRetry = true;
+			OutSkipReason = TEXT("Projectile travel cue is waiting for the replicated source actor before applying local visibility policy.");
+			return false;
+		}
+
+		if (IsSourceActorLocallyControlled())
+		{
+			return true;
+		}
+
+		OutSkipReason = FString::Printf(
+			TEXT("Projectile travel cue with policy %s was skipped because the source actor is not locally controlled on this instance."),
+			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy));
+		return false;
+
+	case EMABSPresentationCueVisibilityPolicy::RelevantClients:
+	default:
+		return true;
+	}
+}
+
+bool AMABSProjectileBase::IsSourceActorLocallyControlled() const
+{
+	if (GetNetMode() == NM_Standalone)
+	{
+		return true;
+	}
+
+	if (const APawn* const SourcePawn = Cast<APawn>(SourceActor))
+	{
+		return SourcePawn->IsLocallyControlled();
+	}
+
+	if (const AController* const SourceController = Cast<AController>(SourceActor))
+	{
+		return SourceController->IsLocalController();
+	}
+
+	if (SourceActor != nullptr)
+	{
+		if (const APawn* const InstigatorPawn = SourceActor->GetInstigator())
+		{
+			return InstigatorPawn->IsLocallyControlled();
+		}
+
+		const AActor* const OuterOwner = SourceActor->GetOwner();
+		if (const APawn* const OuterOwnerPawn = Cast<APawn>(OuterOwner))
+		{
+			return OuterOwnerPawn->IsLocallyControlled();
+		}
+		if (const AController* const OuterOwnerController = Cast<AController>(OuterOwner))
+		{
+			return OuterOwnerController->IsLocalController();
+		}
+	}
+
+	return false;
+}
+
+void AMABSProjectileBase::RealizeTravelCueLocally(const FMABSProjectileTravelCueEvent& CueEvent)
+{
 	if (RootComponent == nullptr)
 	{
 		return;
 	}
 
-	if (SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX != nullptr)
+	if (CueEvent.VFX != nullptr)
 	{
 		UNiagaraFunctionLibrary::SpawnSystemAttached(
-			SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX,
+			CueEvent.VFX,
 			RootComponent,
 			NAME_None,
 			FVector::ZeroVector,
@@ -224,10 +351,63 @@ void AMABSProjectileBase::ActivateTravelPresentation()
 			true);
 	}
 
-	if (SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX != nullptr)
+	if (CueEvent.SFX != nullptr)
 	{
-		UGameplayStatics::SpawnSoundAttached(
-			SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX,
-			RootComponent);
+		UGameplayStatics::SpawnSoundAttached(CueEvent.SFX, RootComponent);
+	}
+}
+
+void AMABSProjectileBase::ActivateTravelPresentation()
+{
+	if (bTravelPresentationActivated || SourceAbilityDefinition == nullptr)
+	{
+		return;
+	}
+
+	FMABSProjectileTravelCueEvent CueEvent;
+	if (!BuildProjectileTravelCueEvent(CueEvent))
+	{
+		bTravelPresentationActivated = true;
+		return;
+	}
+
+	bool bShouldRetry = false;
+	FString SkipReason;
+	if (!ShouldRealizeTravelCueLocally(CueEvent, bShouldRetry, SkipReason))
+	{
+		if (bShouldRetry)
+		{
+			return;
+		}
+
+		bTravelPresentationActivated = true;
+		if (UMABSAbilityComponent* const AbilityComponent = ResolveOwningAbilityComponent())
+		{
+			AbilityComponent->EmitDebugEvent(
+				FName(TEXT("PresentationCueSkipped")),
+				CueEvent.AbilityTag,
+				CueEvent.AbilityHandle,
+				CueEvent.RuntimeState,
+				EMABSAbilityActivationResult::Success,
+				SkipReason);
+		}
+		return;
+	}
+
+	bTravelPresentationActivated = true;
+	RealizeTravelCueLocally(CueEvent);
+
+	if (UMABSAbilityComponent* const AbilityComponent = ResolveOwningAbilityComponent())
+	{
+		AbilityComponent->EmitDebugEvent(
+			FName(TEXT("PresentationCueRealized")),
+			CueEvent.AbilityTag,
+			CueEvent.AbilityHandle,
+			CueEvent.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			FString::Printf(
+				TEXT("Realized ProjectileTravel cue locally with policy %s. Assets: %s."),
+				*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+				*DescribeProjectileTravelCueAssets(CueEvent)));
 	}
 }

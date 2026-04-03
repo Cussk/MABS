@@ -16,6 +16,7 @@ class AMABSProjectileBase;
 class AActor;
 class UAnimMontage;
 class UCameraShakeBase;
+class UNiagaraComponent;
 class UNiagaraSystem;
 class USceneComponent;
 class USkeletalMeshComponent;
@@ -35,54 +36,6 @@ struct FMABSResolvedAbilityTarget
 	AActor* TargetActor = nullptr;
 	FHitResult ImpactHitResult;
 	bool bHasImpactHitResult = false;
-};
-
-USTRUCT()
-struct FMABSPresentationCueRuntimeData
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	TObjectPtr<UNiagaraSystem> VFX = nullptr;
-
-	UPROPERTY()
-	TObjectPtr<USoundBase> SFX = nullptr;
-
-	UPROPERTY()
-	TSubclassOf<UCameraShakeBase> CameraShakeClass = nullptr;
-
-	UPROPERTY()
-	FVector Location = FVector::ZeroVector;
-
-	UPROPERTY()
-	FRotator Rotation = FRotator::ZeroRotator;
-
-	UPROPERTY()
-	float CameraShakeInnerRadius = 0.0f;
-
-	UPROPERTY()
-	float CameraShakeOuterRadius = 0.0f;
-
-	UPROPERTY()
-	float CameraShakeFalloff = 1.0f;
-};
-
-USTRUCT()
-struct FMABSTracerPresentationRuntimeData
-{
-	GENERATED_BODY()
-
-	UPROPERTY()
-	TObjectPtr<UNiagaraSystem> VFX = nullptr;
-
-	UPROPERTY()
-	TObjectPtr<USoundBase> SFX = nullptr;
-
-	UPROPERTY()
-	FVector TraceStart = FVector::ZeroVector;
-
-	UPROPERTY()
-	FVector TraceEnd = FVector::ZeroVector;
 };
 
 UCLASS(ClassGroup=(MABS), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
@@ -174,11 +127,17 @@ private:
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayActivationMontage(UAnimMontage* Montage, float PlayRate);
 
-	UFUNCTION(NetMulticast, Reliable)
-	void MulticastPlayPresentationCue(const FMABSPresentationCueRuntimeData& CueData);
+	UFUNCTION(Client, Unreliable)
+	void ClientPlayPresentationCue(const FMABSPresentationCueEvent& CueEvent);
 
-	UFUNCTION(NetMulticast, Reliable)
-	void MulticastSpawnTracerPresentation(const FMABSTracerPresentationRuntimeData& TracerData);
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayPresentationCue(const FMABSPresentationCueEvent& CueEvent);
+
+	UFUNCTION(Client, Unreliable)
+	void ClientSpawnTracerPresentation(const FMABSTracerCueEvent& TracerEvent);
+
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastSpawnTracerPresentation(const FMABSTracerCueEvent& TracerEvent);
 
 	EMABSAbilityActivationResult HandleTryActivateAbility(const FGameplayTag& AbilityTag, bool bNotifyOwningClient);
 
@@ -322,6 +281,30 @@ private:
 		EMABSAbilityRuntimeState RuntimeState,
 		bool bNotifyOwningClient);
 
+	bool ResolveCueVisibilityPolicy(
+		EMABSPresentationCueVisibilityPolicy RequestedPolicy,
+		EMABSPresentationCuePhase CuePhase,
+		const FGameplayTag& AbilityTag,
+		const FMABSAbilityHandle& AbilityHandle,
+		EMABSAbilityRuntimeState RuntimeState,
+		bool bNotifyOwningClient,
+		EMABSPresentationCueVisibilityPolicy& OutResolvedPolicy,
+		FString& OutResolutionMessage);
+
+	bool RoutePresentationCue(
+		const FMABSPresentationCueEvent& CueEvent,
+		const FGameplayTag& AbilityTag,
+		const FMABSAbilityHandle& AbilityHandle,
+		EMABSAbilityRuntimeState RuntimeState,
+		bool bNotifyOwningClient);
+
+	bool RouteTracerCue(
+		const FMABSTracerCueEvent& TracerEvent,
+		const FGameplayTag& AbilityTag,
+		const FMABSAbilityHandle& AbilityHandle,
+		EMABSAbilityRuntimeState RuntimeState,
+		bool bNotifyOwningClient);
+
 	void TriggerStartupPresentation(const FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
 	void TriggerDeliveryPresentation(const FMABSAbilitySpec& AbilitySpec, EMABSDeliveryMode DeliveryMode, bool bNotifyOwningClient);
@@ -345,9 +328,15 @@ private:
 		const FHitResult& HitResult,
 		AActor* HitActor);
 
-	void PlayPresentationCueLocally(const FMABSPresentationCueRuntimeData& CueData) const;
+	void PlayPresentationCueLocally(const FMABSPresentationCueEvent& CueEvent);
 
-	void SpawnTracerPresentationLocally(const FMABSTracerPresentationRuntimeData& TracerData) const;
+	void SpawnTracerPresentationLocally(const FMABSTracerCueEvent& TracerEvent);
+
+	UNiagaraComponent* AcquireReusableNiagaraComponent(
+		UNiagaraSystem* NiagaraSystem,
+		const FVector& Location,
+		const FRotator& Rotation,
+		TMap<TObjectPtr<UNiagaraSystem>, TArray<TWeakObjectPtr<UNiagaraComponent>>>& ComponentPool);
 
 	float GetEffectiveDeliveryDelay(const UMABSAbilityDefinition& AbilityDefinition) const;
 
@@ -362,6 +351,10 @@ private:
 	FVector ResolveMeleeTraceDirection() const;
 
 	bool TryResolveSocketTransform(const FName& SocketName, FTransform& OutSocketTransform, FString& OutComponentName) const;
+
+	bool CanRouteCueToOwningClient() const;
+
+	bool IsOwningActorLocallyControlled() const;
 
 	bool ResolveDeliveryOriginTransform(
 		const UMABSAbilityDefinition& AbilityDefinition,
@@ -386,4 +379,8 @@ private:
 	int32 NextAbilityHandleValue = 1;
 
 	TMap<FMABSAbilityHandle, FMABSAbilityExecutionContext> ActiveAbilityExecutionContexts;
+
+	TMap<TObjectPtr<UNiagaraSystem>, TArray<TWeakObjectPtr<UNiagaraComponent>>> ReusableCueVFXPool;
+
+	TMap<TObjectPtr<UNiagaraSystem>, TArray<TWeakObjectPtr<UNiagaraComponent>>> ReusableTracerVFXPool;
 };

@@ -2,7 +2,7 @@
 
 ## What it is
 
-This document lists the current Phase 6.5 public surface for MABS and shows which module owns authored cue policy data, runtime cue payloads, projectile travel cues, and routing-aware debug helpers.
+This document lists the current Phase 7 public surface for MABS and shows which module owns authored combo / AoE / periodic data, runtime combo state, periodic runtime entries, and the main gameplay component API.
 
 ## Module ownership
 
@@ -17,23 +17,20 @@ Owns shared authored data and runtime types:
 * `EMABSAbilityActivationPolicy`
 * `EMABSDeliveryMode`
 * `EMABSInstantEffectType`
-* `EMABSPresentationCueVisibilityPolicy`
-* `EMABSPresentationCuePhase`
+* `EMABSAoEShape`
+* `EMABSPeriodicEffectType`
 * `FMABSAbilityHandle`
 * `FMABSAbilitySpec`
 * `FMABSCooldownGroupState`
+* `FMABSComboData`
+* `FMABSAoEData`
+* `FMABSPeriodicEffectData`
+* `FMABSActivePeriodicEffect`
 * `FMABSAbilityDebugEvent`
 * `FMABSTargetTraceDebugInfo`
-* `FMABSPresentationCameraShakeData`
-* `FMABSPresentationCueData`
-* `FMABSHitTraceTracerPresentationData`
-* `FMABSProjectileTravelPresentationData`
 * `FMABSPresentationCueEvent`
 * `FMABSTracerCueEvent`
 * `FMABSProjectileTravelCueEvent`
-* `FMABSPresentationStartupData`
-* `FMABSPresentationDeliveryData`
-* `FMABSPresentationImpactData`
 * `UMABSAbilityDefinition`
 
 ### `MABSGameplay`
@@ -54,91 +51,84 @@ Owns runtime-safe debug helpers:
 
 ## Important authored fields
 
-### `FMABSPresentationCueData`
+### `FMABSComboData`
 
-Shared authored cue fields:
+Combo authored fields:
 
-* `VFX`
-* `SFX`
-* `CameraShake`
-* `SocketName`
-* `LocationOffset`
-* `RotationOffset`
-* `VisibilityPolicy`
+* `NextComboAbilityTag`
+* `ComboWindowStart`
+* `ComboWindowEnd`
+* `bBufferComboInput`
 
-### `FMABSHitTraceTracerPresentationData`
+### `FMABSAoEData`
 
-Tracer authored fields:
+AoE authored fields:
 
-* `TracerVFX`
-* `TracerSFX`
-* `VisibilityPolicy`
+* `bEnabled`
+* `Shape`
+* `Radius`
+* `BoxExtent`
+* `CapsuleRadius`
+* `CapsuleHalfHeight`
+* `Offset`
 
-### `FMABSProjectileTravelPresentationData`
+### `FMABSPeriodicEffectData`
 
-Projectile travel authored fields:
+Periodic authored fields:
 
-* `TravelVFX`
-* `TravelSFX`
-* `VisibilityPolicy`
+* `bEnabled`
+* `EffectType`
+* `Duration`
+* `TickInterval`
+* `TickMagnitude`
 
-## Important runtime cue structs
+## Important runtime types
 
-### `FMABSPresentationCueEvent`
+### `FMABSAbilitySpec`
 
-Used for startup, delivery, and impact cue routing.
+Phase 7 adds combo runtime fields:
 
-Important fields:
+* `ComboWindowStartTime`
+* `ComboWindowEndTime`
+* `QueuedComboAbilityTag`
 
+### `FMABSActivePeriodicEffect`
+
+Authority-side periodic runtime fields:
+
+* `RuntimeId`
 * `AbilityTag`
 * `AbilityHandle`
-* `RuntimeState`
-* `Phase`
-* `VisibilityPolicy`
-* `VFX`
-* `SFX`
-* `CameraShakeClass`
-* `Location`
-* `Rotation`
+* `AbilityDefinition`
+* `SourceActor`
+* `TargetActor`
+* `EffectType`
+* `TickMagnitude`
+* `TickInterval`
+* `AppliedWorldTime`
+* `ExpirationWorldTime`
 
-### `FMABSTracerCueEvent`
+### `UMABSAbilityComponent`
 
-Used for hit-trace tracer routing.
+Important Phase 7 API points:
 
-Important fields:
-
-* `AbilityTag`
-* `AbilityHandle`
-* `RuntimeState`
-* `VisibilityPolicy`
-* `VFX`
-* `SFX`
-* `TraceStart`
-* `TraceEnd`
-
-### `FMABSProjectileTravelCueEvent`
-
-Used by `AMABSProjectileBase` for local projectile-travel realization.
-
-Important fields:
-
-* `AbilityTag`
-* `AbilityHandle`
-* `RuntimeState`
-* `VisibilityPolicy`
-* `VFX`
-* `SFX`
+* `TryActivateAbilityByTag(...)`
+* `GetGrantedAbilities()`
+* `GetActivePeriodicEffects()`
+* `GetRecentDebugEvents()`
+* `GetLatestTargetTraceDebugInfo()`
 
 ## Important debug events
 
-Phase 6.5 adds or highlights:
+Phase 7 adds or highlights:
 
-* `PresentationCueRouted`
-* `PresentationCueSkipped`
-* `PresentationCueRealized`
-* `PresentationCuePolicyFallbackUsed`
-* `TracerCueRouted`
-* `TracerCueSkipped`
-* `TracerCueRealized`
-* `ProjectileTravelPresentationTriggered`
-* `PresentationSocketFallbackUsed`
+* `ComboWindowStarted`
+* `ComboWindowEnded`
+* `ComboQueued`
+* `ComboRejected`
+* `AoEResolved`
+* `AoETargetRejected`
+* `PeriodicEffectApplied`
+* `PeriodicEffectRefreshed`
+* `PeriodicEffectTick`
+* `PeriodicEffectExpired`

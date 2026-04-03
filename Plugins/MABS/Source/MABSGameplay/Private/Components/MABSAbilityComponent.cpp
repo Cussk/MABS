@@ -12,6 +12,7 @@
 #include "Data/MABSAbilityDefinition.h"
 #include "Debug/MABSAbilitySystemLogs.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
@@ -35,10 +36,16 @@ namespace MABSAbilityComponentEventNames
 	static const FName CommitSucceeded(TEXT("CommitSucceeded"));
 	static const FName CooldownRejected(TEXT("CooldownRejected"));
 	static const FName CooldownStarted(TEXT("CooldownStarted"));
+	static const FName ComboQueued(TEXT("ComboQueued"));
+	static const FName ComboRejected(TEXT("ComboRejected"));
+	static const FName ComboWindowEnded(TEXT("ComboWindowEnded"));
+	static const FName ComboWindowStarted(TEXT("ComboWindowStarted"));
 	static const FName DeliveryFailed(TEXT("DeliveryFailed"));
 	static const FName DeliveryStarted(TEXT("DeliveryStarted"));
 	static const FName EffectApplied(TEXT("EffectApplied"));
 	static const FName EffectApplicationFailed(TEXT("EffectApplicationFailed"));
+	static const FName AoEResolved(TEXT("AoEResolved"));
+	static const FName AoETargetRejected(TEXT("AoETargetRejected"));
 	static const FName CostRejected(TEXT("CostRejected"));
 	static const FName CostSpent(TEXT("CostSpent"));
 	static const FName CostValidated(TEXT("CostValidated"));
@@ -59,6 +66,10 @@ namespace MABSAbilityComponentEventNames
 	static const FName ProjectileTravelPresentationTriggered(TEXT("ProjectileTravelPresentationTriggered"));
 	static const FName ProjectileSpawned(TEXT("ProjectileSpawned"));
 	static const FName ProjectileSpawnFailed(TEXT("ProjectileSpawnFailed"));
+	static const FName PeriodicEffectApplied(TEXT("PeriodicEffectApplied"));
+	static const FName PeriodicEffectExpired(TEXT("PeriodicEffectExpired"));
+	static const FName PeriodicEffectRefreshed(TEXT("PeriodicEffectRefreshed"));
+	static const FName PeriodicEffectTick(TEXT("PeriodicEffectTick"));
 	static const FName RecoveryCompleted(TEXT("RecoveryCompleted"));
 	static const FName RecoveryStarted(TEXT("RecoveryStarted"));
 	static const FName RequestAccepted(TEXT("RequestAccepted"));
@@ -94,11 +105,17 @@ namespace
 		case EMABSAbilityActivationResult::InvalidAbility:
 			return TEXT("Activation rejected because the requested ability was invalid.");
 
+		case EMABSAbilityActivationResult::ComboRejected:
+			return TEXT("Activation rejected because the requested combo follow-up was not valid.");
+
 		case EMABSAbilityActivationResult::NotGranted:
 			return TEXT("Activation rejected because the ability has not been granted.");
 
 		case EMABSAbilityActivationResult::AlreadyActive:
 			return TEXT("Activation rejected because the ability is already active.");
+
+		case EMABSAbilityActivationResult::ComboQueued:
+			return TEXT("Activation was accepted and queued as a combo follow-up.");
 
 		case EMABSAbilityActivationResult::Blocked:
 			return TEXT("Activation rejected because the ability is currently blocked.");
@@ -249,6 +266,33 @@ namespace
 		}
 	}
 
+	FString GetPeriodicEffectTypeLabel(const EMABSPeriodicEffectType EffectType)
+	{
+		switch (EffectType)
+		{
+		case EMABSPeriodicEffectType::HOT:
+			return TEXT("HOT");
+
+		default:
+			return TEXT("DOT");
+		}
+	}
+
+	FString GetAoEShapeLabel(const EMABSAoEShape Shape)
+	{
+		switch (Shape)
+		{
+		case EMABSAoEShape::Box:
+			return TEXT("Box");
+
+		case EMABSAoEShape::Capsule:
+			return TEXT("Capsule");
+
+		default:
+			return TEXT("Sphere");
+		}
+	}
+
 	FString GetAbilityLabel(const UMABSAbilityDefinition* AbilityDefinition)
 	{
 		if (AbilityDefinition == nullptr)
@@ -264,6 +308,18 @@ namespace
 	FString FormatVectorForDebug(const FVector& Vector)
 	{
 		return FString::Printf(TEXT("(X=%.0f Y=%.0f Z=%.0f)"), Vector.X, Vector.Y, Vector.Z);
+	}
+
+	FString DescribeActorList(const TArray<AActor*>& Actors)
+	{
+		TArray<FString> ActorLabels;
+		ActorLabels.Reserve(Actors.Num());
+		for (AActor* const Actor : Actors)
+		{
+			ActorLabels.Add(GetNameSafe(Actor));
+		}
+
+		return ActorLabels.IsEmpty() ? TEXT("None") : FString::Join(ActorLabels, TEXT(", "));
 	}
 
 	FString GetHitActorLabel(const AActor* Actor)
@@ -343,6 +399,9 @@ namespace
 	{
 		switch (ActivationResult)
 		{
+		case EMABSAbilityActivationResult::ComboRejected:
+			return MABSAbilityComponentEventNames::ComboRejected;
+
 		case EMABSAbilityActivationResult::OnCooldown:
 			return MABSAbilityComponentEventNames::CooldownRejected;
 
@@ -461,6 +520,10 @@ FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* A
 	AbilitySpec.ActivationStartTime = 0.0f;
 	AbilitySpec.ScheduledDeliveryTime = 0.0f;
 	AbilitySpec.RecoveryEndTime = 0.0f;
+	AbilitySpec.ComboWindowStartTime = 0.0f;
+	AbilitySpec.ComboWindowEndTime = 0.0f;
+	AbilitySpec.QueuedComboAbilityTag = FGameplayTag();
+	AbilitySpec.ComboInputRoutingTag = FGameplayTag();
 	GrantedAbilities.Add(AbilitySpec);
 
 	EmitDebugEvent(
@@ -552,7 +615,7 @@ EMABSAbilityActivationResult UMABSAbilityComponent::TryActivateAbilityByTag(cons
 
 	if (CanMutateAbilityState())
 	{
-		return HandleTryActivateAbility(AbilityTag, false);
+		return HandleTryActivateAbility(AbilityTag, false, AbilityTag);
 	}
 
 	const FMABSAbilitySpec* AbilitySpec = FindGrantedAbilitySpecByTagInternal(AbilityTag);
@@ -628,6 +691,11 @@ FMABSTargetTraceDebugInfo UMABSAbilityComponent::GetLatestTargetTraceDebugInfo()
 	return LatestTargetTraceDebugInfo;
 }
 
+TArray<FMABSActivePeriodicEffect> UMABSAbilityComponent::GetActivePeriodicEffects() const
+{
+	return ActivePeriodicEffects;
+}
+
 void UMABSAbilityComponent::SetDebugReplicationEnabled(const bool bEnabled)
 {
 	if (!CanMutateAbilityState())
@@ -645,7 +713,7 @@ bool UMABSAbilityComponent::IsDebugReplicationEnabled() const
 
 void UMABSAbilityComponent::ServerTryActivateAbilityByTag_Implementation(const FGameplayTag AbilityTag)
 {
-	HandleTryActivateAbility(AbilityTag, true);
+	HandleTryActivateAbility(AbilityTag, true, AbilityTag);
 }
 
 void UMABSAbilityComponent::ClientReceiveAbilityDebugEvent_Implementation(const FMABSAbilityDebugEvent& DebugEvent)
@@ -683,7 +751,10 @@ void UMABSAbilityComponent::MulticastSpawnTracerPresentation_Implementation(cons
 	SpawnTracerPresentationLocally(TracerEvent);
 }
 
-EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(const FGameplayTag& AbilityTag, const bool bNotifyOwningClient)
+EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(
+	const FGameplayTag& AbilityTag,
+	const bool bNotifyOwningClient,
+	const FGameplayTag& ComboInputRoutingTag)
 {
 	const FMABSAbilityHandle InvalidHandle;
 
@@ -704,6 +775,12 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(con
 		}
 
 		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	const EMABSAbilityActivationResult ComboQueueResult = TryQueueComboFollowup(AbilityTag, bNotifyOwningClient);
+	if (ComboQueueResult != EMABSAbilityActivationResult::None)
+	{
+		return ComboQueueResult;
 	}
 
 	FMABSAbilitySpec* AbilitySpec = FindGrantedAbilitySpecByTagMutable(AbilityTag);
@@ -784,7 +861,10 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleTryActivateAbility(con
 		EmitDebugEventToOwningClient(AcceptedEvent);
 	}
 
-	return BeginAbilityStartup(*AbilitySpec, bNotifyOwningClient);
+	return BeginAbilityStartup(
+		*AbilitySpec,
+		bNotifyOwningClient,
+		ComboInputRoutingTag.IsValid() ? ComboInputRoutingTag : AbilityTag);
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const
@@ -802,10 +882,49 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
-	if (AbilityDefinition->InstantEffectType == EMABSInstantEffectType::None
-		|| AbilityDefinition->EffectMagnitude <= 0.0f)
+	if (!HasAuthoredGameplayEffect(AbilityDefinition))
 	{
-		OutDebugMessage = TEXT("Activation rejected because the authored instant effect is invalid.");
+		OutDebugMessage = TEXT("Activation rejected because the ability does not author a valid instant or periodic gameplay effect.");
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	if (AbilityDefinition->InstantEffectType != EMABSInstantEffectType::None
+		&& AbilityDefinition->EffectMagnitude <= 0.0f)
+	{
+		OutDebugMessage = TEXT("Activation rejected because the authored instant effect magnitude must be greater than zero.");
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	if (AbilityDefinition->PeriodicEffect.bEnabled && !AbilityDefinition->PeriodicEffect.IsValid())
+	{
+		OutDebugMessage = TEXT("Activation rejected because the authored periodic effect data is invalid.");
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	if (AbilityDefinition->AoE.bEnabled && !AbilityDefinition->AoE.IsValid())
+	{
+		OutDebugMessage = TEXT("Activation rejected because the authored AoE data is invalid.");
+		return EMABSAbilityActivationResult::InvalidAbility;
+	}
+
+	if (AbilityDefinition->Combo.NextComboAbilityTag.IsValid())
+	{
+		if (AbilityDefinition->DeliveryMode != EMABSDeliveryMode::Melee)
+		{
+			OutDebugMessage = TEXT("Activation rejected because combo follow-ups are only supported for Melee delivery in Phase 7.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+
+		if (!AbilityDefinition->Combo.IsEnabled())
+		{
+			OutDebugMessage = TEXT("Activation rejected because the authored combo window is invalid.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
+	}
+
+	if (AbilityDefinition->TargetType == EMABSTargetType::Location)
+	{
+		OutDebugMessage = TEXT("Activation rejected because location target intent is not supported in Phase 7.");
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
 
@@ -964,7 +1083,149 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 	return EMABSAbilityActivationResult::Success;
 }
 
-EMABSAbilityActivationResult UMABSAbilityComponent::BeginAbilityStartup(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
+EMABSAbilityActivationResult UMABSAbilityComponent::TryQueueComboFollowup(const FGameplayTag& RequestedAbilityTag, const bool bNotifyOwningClient)
+{
+	FMABSAbilitySpec* const ComboSourceSpec = FindActiveComboSourceSpecForRequest(RequestedAbilityTag);
+	if (ComboSourceSpec == nullptr)
+	{
+		return EMABSAbilityActivationResult::None;
+	}
+
+	const UMABSAbilityDefinition* const SourceDefinition = ComboSourceSpec->AbilityDefinition;
+	if (SourceDefinition == nullptr || !SourceDefinition->Combo.NextComboAbilityTag.IsValid())
+	{
+		return EMABSAbilityActivationResult::None;
+	}
+
+	const FGameplayTag RequestedFollowupAbilityTag = SourceDefinition->Combo.NextComboAbilityTag;
+
+	FMABSAbilitySpec* const RequestedAbilitySpec = FindGrantedAbilitySpecByTagMutable(RequestedFollowupAbilityTag);
+	if (RequestedAbilitySpec == nullptr)
+	{
+		const FMABSAbilityDebugEvent RejectedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ComboRejected,
+			ComboSourceSpec->AbilityTag,
+			ComboSourceSpec->Handle,
+			ComboSourceSpec->RuntimeState,
+			EMABSAbilityActivationResult::NotGranted,
+			FString::Printf(
+				TEXT("Rejected combo follow-up '%s' because it has not been granted."),
+				*RequestedFollowupAbilityTag.ToString()));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(RejectedEvent);
+		}
+
+		return EMABSAbilityActivationResult::NotGranted;
+	}
+
+	UWorld* const World = GetWorld();
+	if (SourceDefinition == nullptr || World == nullptr)
+	{
+		RequestedAbilitySpec->LastActivationResult = EMABSAbilityActivationResult::ComboRejected;
+		return EMABSAbilityActivationResult::ComboRejected;
+	}
+
+	const float CurrentWorldTime = World->GetTimeSeconds();
+	const bool bWindowOpen = 
+		ComboSourceSpec->ComboWindowEndTime > ComboSourceSpec->ComboWindowStartTime
+		&& CurrentWorldTime >= ComboSourceSpec->ComboWindowStartTime
+		&& CurrentWorldTime <= ComboSourceSpec->ComboWindowEndTime;
+	if (!bWindowOpen)
+	{
+		RequestedAbilitySpec->LastActivationResult = EMABSAbilityActivationResult::ComboRejected;
+
+		const FMABSAbilityDebugEvent RejectedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ComboRejected,
+			ComboSourceSpec->AbilityTag,
+			ComboSourceSpec->Handle,
+			ComboSourceSpec->RuntimeState,
+			EMABSAbilityActivationResult::ComboRejected,
+			FString::Printf(
+				TEXT("Rejected combo follow-up '%s' because the combo window for ability '%s' is not open."),
+				*RequestedFollowupAbilityTag.ToString(),
+				*GetAbilityLabel(SourceDefinition)));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(RejectedEvent);
+		}
+
+		return EMABSAbilityActivationResult::ComboRejected;
+	}
+
+	if (!SourceDefinition->Combo.bBufferComboInput
+		&& ComboSourceSpec->RuntimeState != EMABSAbilityRuntimeState::Recovery)
+	{
+		RequestedAbilitySpec->LastActivationResult = EMABSAbilityActivationResult::ComboRejected;
+
+		const FMABSAbilityDebugEvent RejectedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ComboRejected,
+			ComboSourceSpec->AbilityTag,
+			ComboSourceSpec->Handle,
+			ComboSourceSpec->RuntimeState,
+			EMABSAbilityActivationResult::ComboRejected,
+			FString::Printf(
+				TEXT("Rejected combo follow-up '%s' because input buffering is disabled and ability '%s' is not yet in recovery."),
+				*RequestedFollowupAbilityTag.ToString(),
+				*GetAbilityLabel(SourceDefinition)));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(RejectedEvent);
+		}
+
+		return EMABSAbilityActivationResult::ComboRejected;
+	}
+
+	FString ValidationMessage;
+	const EMABSAbilityActivationResult ValidationResult = CanActivateAbility(*RequestedAbilitySpec, ValidationMessage);
+	if (ValidationResult != EMABSAbilityActivationResult::Success)
+	{
+		RequestedAbilitySpec->LastActivationResult = ValidationResult;
+
+		const FMABSAbilityDebugEvent RejectedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::ComboRejected,
+			ComboSourceSpec->AbilityTag,
+			ComboSourceSpec->Handle,
+			ComboSourceSpec->RuntimeState,
+			ValidationResult,
+			FString::Printf(
+				TEXT("Rejected combo follow-up '%s': %s"),
+				*RequestedFollowupAbilityTag.ToString(),
+				*ValidationMessage));
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(RejectedEvent);
+		}
+
+		return ValidationResult;
+	}
+
+	ComboSourceSpec->QueuedComboAbilityTag = RequestedFollowupAbilityTag;
+	RequestedAbilitySpec->LastActivationResult = EMABSAbilityActivationResult::ComboQueued;
+
+	const FMABSAbilityDebugEvent QueuedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::ComboQueued,
+		ComboSourceSpec->AbilityTag,
+		ComboSourceSpec->Handle,
+		ComboSourceSpec->RuntimeState,
+		EMABSAbilityActivationResult::ComboQueued,
+		FString::Printf(
+			TEXT("Queued combo follow-up '%s' from ability '%s' after request '%s'."),
+			*RequestedFollowupAbilityTag.ToString(),
+			*GetAbilityLabel(SourceDefinition),
+			*RequestedAbilityTag.ToString()));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(QueuedEvent);
+	}
+
+	return EMABSAbilityActivationResult::ComboQueued;
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::BeginAbilityStartup(
+	FMABSAbilitySpec& AbilitySpec,
+	const bool bNotifyOwningClient,
+	const FGameplayTag& ComboInputRoutingTag)
 {
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
 	UWorld* const World = GetWorld();
@@ -1001,6 +1262,10 @@ EMABSAbilityActivationResult UMABSAbilityComponent::BeginAbilityStartup(FMABSAbi
 	AbilitySpec.ActivationStartTime = CurrentWorldTime;
 	AbilitySpec.ScheduledDeliveryTime = CurrentWorldTime + DeliveryDelay;
 	AbilitySpec.RecoveryEndTime = 0.0f;
+	AbilitySpec.ComboWindowStartTime = 0.0f;
+	AbilitySpec.ComboWindowEndTime = 0.0f;
+	AbilitySpec.QueuedComboAbilityTag = FGameplayTag();
+	AbilitySpec.ComboInputRoutingTag = ComboInputRoutingTag;
 
 	const FMABSAbilityDebugEvent StartupStartedEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::StartupStarted,
@@ -1035,6 +1300,48 @@ EMABSAbilityActivationResult UMABSAbilityComponent::BeginAbilityStartup(FMABSAbi
 	if (bNotifyOwningClient)
 	{
 		EmitDebugEventToOwningClient(DeliveryScheduledEvent);
+	}
+
+	if (AbilityDefinition->Combo.IsEnabled())
+	{
+		const float ComboWindowStartDelay = FMath::Max(0.0f, AbilityDefinition->Combo.ComboWindowStart);
+		const float ComboWindowEndDelay = FMath::Max(ComboWindowStartDelay, AbilityDefinition->Combo.ComboWindowEnd);
+		AbilitySpec.ComboWindowStartTime = CurrentWorldTime + ComboWindowStartDelay;
+		AbilitySpec.ComboWindowEndTime = CurrentWorldTime + ComboWindowEndDelay;
+
+		if (ComboWindowStartDelay <= KINDA_SMALL_NUMBER)
+		{
+			OpenComboWindow(AbilitySpec.Handle);
+		}
+		else
+		{
+			FTimerDelegate ComboWindowStartDelegate = FTimerDelegate::CreateUObject(
+				this,
+				&UMABSAbilityComponent::OpenComboWindow,
+				AbilitySpec.Handle);
+			World->GetTimerManager().SetTimer(
+				ExecutionContext.ComboWindowStartTimerHandle,
+				ComboWindowStartDelegate,
+				ComboWindowStartDelay,
+				false);
+		}
+
+		if (ComboWindowEndDelay <= KINDA_SMALL_NUMBER)
+		{
+			CloseComboWindow(AbilitySpec.Handle);
+		}
+		else
+		{
+			FTimerDelegate ComboWindowEndDelegate = FTimerDelegate::CreateUObject(
+				this,
+				&UMABSAbilityComponent::CloseComboWindow,
+				AbilitySpec.Handle);
+			World->GetTimerManager().SetTimer(
+				ExecutionContext.ComboWindowEndTimerHandle,
+				ComboWindowEndDelegate,
+				ComboWindowEndDelay,
+				false);
+		}
 	}
 
 	if (DeliveryDelay <= KINDA_SMALL_NUMBER)
@@ -1100,6 +1407,89 @@ void UMABSAbilityComponent::TriggerScheduledAbilityDelivery(const FMABSAbilityHa
 	CommitAbility(*AbilitySpec, ExecutionContext->bNotifyOwningClient);
 }
 
+void UMABSAbilityComponent::OpenComboWindow(const FMABSAbilityHandle AbilityHandle)
+{
+	FMABSAbilityExecutionContext* const ExecutionContext = ActiveAbilityExecutionContexts.Find(AbilityHandle);
+	FMABSAbilitySpec* const AbilitySpec = FindGrantedAbilitySpecByHandle(AbilityHandle);
+	if (ExecutionContext == nullptr || AbilitySpec == nullptr || AbilitySpec->AbilityDefinition == nullptr)
+	{
+		return;
+	}
+
+	if (AbilitySpec->RuntimeState == EMABSAbilityRuntimeState::Idle
+		|| AbilitySpec->RuntimeState == EMABSAbilityRuntimeState::Blocked)
+	{
+		return;
+	}
+
+	if (ExecutionContext->bIsComboWindowOpen)
+	{
+		return;
+	}
+
+	ExecutionContext->bIsComboWindowOpen = true;
+
+	const FMABSAbilityDebugEvent ComboWindowStartedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::ComboWindowStarted,
+		AbilitySpec->AbilityTag,
+		AbilitySpec->Handle,
+		AbilitySpec->RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Opened combo window for ability '%s' until world time %.2f. Next combo ability is '%s'."),
+			*GetAbilityLabel(AbilitySpec->AbilityDefinition),
+			AbilitySpec->ComboWindowEndTime,
+			*AbilitySpec->AbilityDefinition->Combo.NextComboAbilityTag.ToString()));
+	if (ExecutionContext->bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(ComboWindowStartedEvent);
+	}
+}
+
+void UMABSAbilityComponent::CloseComboWindow(const FMABSAbilityHandle AbilityHandle)
+{
+	FMABSAbilityExecutionContext* const ExecutionContext = ActiveAbilityExecutionContexts.Find(AbilityHandle);
+	FMABSAbilitySpec* const AbilitySpec = FindGrantedAbilitySpecByHandle(AbilityHandle);
+	if (AbilitySpec == nullptr)
+	{
+		return;
+	}
+
+	const bool bNotifyOwningClient = ExecutionContext != nullptr && ExecutionContext->bNotifyOwningClient;
+	const bool bWasComboWindowOpen = ExecutionContext != nullptr && ExecutionContext->bIsComboWindowOpen;
+	if (ExecutionContext != nullptr)
+	{
+		ExecutionContext->bIsComboWindowOpen = false;
+	}
+
+	AbilitySpec->ComboWindowStartTime = 0.0f;
+	AbilitySpec->ComboWindowEndTime = 0.0f;
+
+	if (!bWasComboWindowOpen)
+	{
+		return;
+	}
+
+	const FMABSAbilityDebugEvent ComboWindowEndedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::ComboWindowEnded,
+		AbilitySpec->AbilityTag,
+		AbilitySpec->Handle,
+		AbilitySpec->RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		AbilitySpec->QueuedComboAbilityTag.IsValid()
+			? FString::Printf(
+				TEXT("Closed combo window for ability '%s' with queued follow-up '%s'."),
+				*GetAbilityLabel(AbilitySpec->AbilityDefinition),
+				*AbilitySpec->QueuedComboAbilityTag.ToString())
+			: FString::Printf(
+				TEXT("Closed combo window for ability '%s' with no queued follow-up."),
+				*GetAbilityLabel(AbilitySpec->AbilityDefinition)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(ComboWindowEndedEvent);
+	}
+}
+
 void UMABSAbilityComponent::BeginAbilityRecovery(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
 {
 	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
@@ -1113,10 +1503,14 @@ void UMABSAbilityComponent::BeginAbilityRecovery(FMABSAbilitySpec& AbilitySpec, 
 
 	const float CurrentWorldTime = World->GetTimeSeconds();
 	const float RecoveryDuration = FMath::Max(0.0f, AbilityDefinition->RecoveryDuration);
+	const float ComboWindowEndTime = AbilityDefinition->Combo.IsEnabled()
+		? FMath::Max(0.0f, AbilityDefinition->Combo.ComboWindowEnd)
+		: 0.0f;
+	const float EffectiveAbilityEndTime = FMath::Max(RecoveryDuration, ComboWindowEndTime);
 	const float ActivationElapsedTime = AbilitySpec.ActivationStartTime > 0.0f
 		? FMath::Max(0.0f, CurrentWorldTime - AbilitySpec.ActivationStartTime)
 		: 0.0f;
-	const float RemainingRecoveryTime = FMath::Max(0.0f, RecoveryDuration - ActivationElapsedTime);
+	const float RemainingRecoveryTime = FMath::Max(0.0f, EffectiveAbilityEndTime - ActivationElapsedTime);
 	AbilitySpec.ScheduledDeliveryTime = 0.0f;
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Recovery;
 	AbilitySpec.RecoveryEndTime = RemainingRecoveryTime > KINDA_SMALL_NUMBER
@@ -1130,10 +1524,10 @@ void UMABSAbilityComponent::BeginAbilityRecovery(FMABSAbilitySpec& AbilitySpec, 
 		AbilitySpec.RuntimeState,
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
-			TEXT("Ability '%s' entered recovery with %.2f seconds remaining. Authored total ability time is %.2f seconds from activation start."),
+			TEXT("Ability '%s' entered recovery with %.2f seconds remaining. Effective total ability time is %.2f seconds from activation start."),
 			*GetAbilityLabel(AbilityDefinition),
 			RemainingRecoveryTime,
-			RecoveryDuration));
+			EffectiveAbilityEndTime));
 	if (bNotifyOwningClient)
 	{
 		EmitDebugEventToOwningClient(RecoveryStartedEvent);
@@ -1173,10 +1567,15 @@ void UMABSAbilityComponent::CompleteAbilityRecovery(const FMABSAbilityHandle Abi
 	}
 
 	const bool bNotifyOwningClient = ExecutionContext != nullptr ? ExecutionContext->bNotifyOwningClient : false;
+	const FGameplayTag QueuedComboAbilityTag = AbilitySpec->QueuedComboAbilityTag;
+	const FGameplayTag ComboInputRoutingTag = AbilitySpec->ComboInputRoutingTag;
+	CloseComboWindow(AbilityHandle);
 	AbilitySpec->RuntimeState = EMABSAbilityRuntimeState::Idle;
 	AbilitySpec->RecoveryEndTime = 0.0f;
 	AbilitySpec->ActivationStartTime = 0.0f;
 	AbilitySpec->ScheduledDeliveryTime = 0.0f;
+	AbilitySpec->QueuedComboAbilityTag = FGameplayTag();
+	AbilitySpec->ComboInputRoutingTag = FGameplayTag();
 
 	const FMABSAbilityDebugEvent RecoveryCompletedEvent = EmitDebugEvent(
 		MABSAbilityComponentEventNames::RecoveryCompleted,
@@ -1193,16 +1592,31 @@ void UMABSAbilityComponent::CompleteAbilityRecovery(const FMABSAbilityHandle Abi
 	}
 
 	ClearAbilityExecutionContext(AbilityHandle, false);
+
+	if (QueuedComboAbilityTag.IsValid())
+	{
+		HandleTryActivateAbility(
+			QueuedComboAbilityTag,
+			bNotifyOwningClient,
+			ComboInputRoutingTag.IsValid() ? ComboInputRoutingTag : QueuedComboAbilityTag);
+	}
 }
 
 void UMABSAbilityComponent::ClearAbilityExecutionContext(const FMABSAbilityHandle AbilityHandle, const bool bResetRuntimeTimes)
 {
 	if (FMABSAbilityExecutionContext* const ExecutionContext = ActiveAbilityExecutionContexts.Find(AbilityHandle))
 	{
+		if (ExecutionContext->bIsComboWindowOpen)
+		{
+			CloseComboWindow(AbilityHandle);
+		}
+
 		if (UWorld* const World = GetWorld())
 		{
 			World->GetTimerManager().ClearTimer(ExecutionContext->DeliveryTimerHandle);
 			World->GetTimerManager().ClearTimer(ExecutionContext->RecoveryTimerHandle);
+			World->GetTimerManager().ClearTimer(ExecutionContext->ComboWindowStartTimerHandle);
+			World->GetTimerManager().ClearTimer(ExecutionContext->ComboWindowEndTimerHandle);
 		}
 
 		ActiveAbilityExecutionContexts.Remove(AbilityHandle);
@@ -1222,6 +1636,10 @@ void UMABSAbilityComponent::ClearAbilityRuntimeTimes(FMABSAbilitySpec& AbilitySp
 	AbilitySpec.ActivationStartTime = 0.0f;
 	AbilitySpec.ScheduledDeliveryTime = 0.0f;
 	AbilitySpec.RecoveryEndTime = 0.0f;
+	AbilitySpec.ComboWindowStartTime = 0.0f;
+	AbilitySpec.ComboWindowEndTime = 0.0f;
+	AbilitySpec.QueuedComboAbilityTag = FGameplayTag();
+	AbilitySpec.ComboInputRoutingTag = FGameplayTag();
 }
 
 EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySpec& AbilitySpec, const bool bNotifyOwningClient)
@@ -1351,23 +1769,8 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 				bNotifyOwningClient);
 			if (ResolvedTarget.TargetActor == nullptr)
 			{
-				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
-				ClearAbilityExecutionContext(AbilitySpec.Handle, true);
-
-				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-					MABSAbilityComponentEventNames::DeliveryFailed,
-					AbilitySpec.AbilityTag,
-					AbilitySpec.Handle,
-					AbilitySpec.RuntimeState,
-					EMABSAbilityActivationResult::DeliveryFailed,
-					DeliveryDebugMessage);
-				if (bNotifyOwningClient)
-				{
-					EmitDebugEventToOwningClient(DebugEvent);
-				}
-
-				return EMABSAbilityActivationResult::DeliveryFailed;
+				// Melee swings can still commit on a whiff so recovery, combo windows, and queued follow-ups survive.
+				return FinalizeAbilityCommit(AbilitySpec, DeliveryMode, bNotifyOwningClient);
 			}
 
 			return CompleteResolvedTargetAbility(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
@@ -1723,15 +2126,50 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CompleteResolvedTargetAbilit
 {
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
 
-	FString EffectDebugMessage;
-	const EMABSAbilityActivationResult EffectResult = ApplyInstantEffect(
-		AbilitySpec,
-		ResolvedTarget.TargetActor,
-		EffectDebugMessage);
-	if (EffectResult != EMABSAbilityActivationResult::Success)
+	TArray<AActor*> TargetActors;
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	FString TargetResolutionMessage;
+	if (AbilityDefinition != nullptr && AbilityDefinition->AoE.IsValid())
+	{
+		if (!ResolveAoETargets(AbilitySpec, ResolvedTarget, TargetActors, TargetResolutionMessage, bNotifyOwningClient))
+		{
+			const EMABSAbilityActivationResult FailureResult = DeliveryMode == EMABSDeliveryMode::Direct
+				? EMABSAbilityActivationResult::TargetResolutionFailed
+				: EMABSAbilityActivationResult::DeliveryFailed;
+			const FName FailureEventName = DeliveryMode == EMABSDeliveryMode::Direct
+				? MABSAbilityComponentEventNames::TargetResolutionFailed
+				: MABSAbilityComponentEventNames::DeliveryFailed;
+
+			AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+			AbilitySpec.LastActivationResult = FailureResult;
+			ClearAbilityExecutionContext(AbilitySpec.Handle, true);
+
+			const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+				FailureEventName,
+				AbilitySpec.AbilityTag,
+				AbilitySpec.Handle,
+				AbilitySpec.RuntimeState,
+				FailureResult,
+				TargetResolutionMessage);
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(DebugEvent);
+			}
+
+			return FailureResult;
+		}
+	}
+	else if (ResolvedTarget.TargetActor != nullptr)
+	{
+		TargetActors.Add(ResolvedTarget.TargetActor);
+	}
+
+	TArray<AActor*> AffectedTargets;
+	FString EffectFailureMessage;
+	if (!ApplyGameplayEffectsToTargets(AbilitySpec, TargetActors, AffectedTargets, EffectFailureMessage, bNotifyOwningClient))
 	{
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-		AbilitySpec.LastActivationResult = EffectResult;
+		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::EffectApplicationFailed;
 		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
@@ -1739,26 +2177,14 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CompleteResolvedTargetAbilit
 			AbilitySpec.AbilityTag,
 			AbilitySpec.Handle,
 			AbilitySpec.RuntimeState,
-			EffectResult,
-			EffectDebugMessage);
+			EMABSAbilityActivationResult::EffectApplicationFailed,
+			EffectFailureMessage);
 		if (bNotifyOwningClient)
 		{
 			EmitDebugEventToOwningClient(DebugEvent);
 		}
 
-		return EffectResult;
-	}
-
-	const FMABSAbilityDebugEvent EffectAppliedEvent = EmitDebugEvent(
-		MABSAbilityComponentEventNames::EffectApplied,
-		AbilitySpec.AbilityTag,
-		AbilitySpec.Handle,
-		AbilitySpec.RuntimeState,
-		EMABSAbilityActivationResult::Success,
-		EffectDebugMessage);
-	if (bNotifyOwningClient)
-	{
-		EmitDebugEventToOwningClient(EffectAppliedEvent);
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
 	}
 
 	TriggerImpactPresentation(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
@@ -2088,7 +2514,7 @@ AActor* UMABSAbilityComponent::ResolveActorTargetFromTrace(
 		FString RejectionReason;
 		const bool bRequireValidActorTarget =
 			DeliveryMode == EMABSDeliveryMode::Direct ? AbilityDefinition->bRequireValidActorTarget : true;
-		if (!ValidateTargetActorForAbility(AbilityDefinition, Owner, HitActor, bRequireValidActorTarget, RejectionReason))
+		if (!ValidateTargetActorForAbility(AbilityDefinition, Owner, HitActor, bRequireValidActorTarget, false, RejectionReason))
 		{
 			TraceDebugInfo.bAcceptedTarget = false;
 			TraceDebugInfo.ResultMessage = FString::Printf(
@@ -2253,6 +2679,293 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ApplyInstantEffectFromSource
 	}
 }
 
+EMABSAbilityActivationResult UMABSAbilityComponent::ApplyPeriodicEffect(
+	const FMABSAbilitySpec& AbilitySpec,
+	AActor* TargetActor,
+	const bool bNotifyOwningClient)
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	AActor* const SourceActor = GetOwner();
+	UWorld* const World = GetWorld();
+	if (AbilityDefinition == nullptr || SourceActor == nullptr || TargetActor == nullptr || World == nullptr)
+	{
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
+	}
+
+	if (!HasPeriodicGameplayEffect(AbilityDefinition))
+	{
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
+	}
+
+	const float CurrentWorldTime = World->GetTimeSeconds();
+	const float ExpirationWorldTime = CurrentWorldTime + AbilityDefinition->PeriodicEffect.Duration;
+	FMABSPeriodicEffectRuntime* ExistingRuntime = FindPeriodicEffectRuntime(AbilitySpec, TargetActor);
+	const bool bWasRefresh = ExistingRuntime != nullptr;
+	if (ExistingRuntime == nullptr)
+	{
+		FMABSPeriodicEffectRuntime NewRuntime;
+		NewRuntime.State.RuntimeId = MakeNextPeriodicEffectRuntimeId();
+		ExistingRuntime = &ActivePeriodicEffectRuntimes.Add(NewRuntime.State.RuntimeId, MoveTemp(NewRuntime));
+	}
+
+	if (ExistingRuntime == nullptr)
+	{
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
+	}
+
+	if (bWasRefresh)
+	{
+		World->GetTimerManager().ClearTimer(ExistingRuntime->TickTimerHandle);
+		World->GetTimerManager().ClearTimer(ExistingRuntime->ExpirationTimerHandle);
+	}
+
+	ExistingRuntime->State.AbilityTag = AbilitySpec.AbilityTag;
+	ExistingRuntime->State.AbilityHandle = AbilitySpec.Handle;
+	ExistingRuntime->State.AbilityDefinition = const_cast<UMABSAbilityDefinition*>(AbilityDefinition);
+	ExistingRuntime->State.SourceActor = SourceActor;
+	ExistingRuntime->State.TargetActor = TargetActor;
+	ExistingRuntime->State.EffectType = AbilityDefinition->PeriodicEffect.EffectType;
+	ExistingRuntime->State.TickMagnitude = AbilityDefinition->PeriodicEffect.TickMagnitude;
+	ExistingRuntime->State.TickInterval = AbilityDefinition->PeriodicEffect.TickInterval;
+	ExistingRuntime->State.AppliedWorldTime = CurrentWorldTime;
+	ExistingRuntime->State.ExpirationWorldTime = ExpirationWorldTime;
+	ExistingRuntime->bNotifyOwningClient = ExistingRuntime->bNotifyOwningClient || bNotifyOwningClient;
+
+	FTimerDelegate TickDelegate = FTimerDelegate::CreateUObject(
+		this,
+		&UMABSAbilityComponent::TickPeriodicEffect,
+		ExistingRuntime->State.RuntimeId);
+	World->GetTimerManager().SetTimer(
+		ExistingRuntime->TickTimerHandle,
+		TickDelegate,
+		AbilityDefinition->PeriodicEffect.TickInterval,
+		true);
+
+	FTimerDelegate ExpirationDelegate = FTimerDelegate::CreateUObject(
+		this,
+		&UMABSAbilityComponent::ExpirePeriodicEffect,
+		ExistingRuntime->State.RuntimeId);
+	World->GetTimerManager().SetTimer(
+		ExistingRuntime->ExpirationTimerHandle,
+		ExpirationDelegate,
+		AbilityDefinition->PeriodicEffect.Duration,
+		false);
+
+	RefreshActivePeriodicEffects();
+
+	const FMABSAbilityDebugEvent PeriodicEvent = EmitDebugEvent(
+		bWasRefresh
+			? MABSAbilityComponentEventNames::PeriodicEffectRefreshed
+			: MABSAbilityComponentEventNames::PeriodicEffectApplied,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("%s %s on '%s' for %.2f seconds with %.2f magnitude every %.2f seconds."),
+			bWasRefresh ? TEXT("Refreshed") : TEXT("Applied"),
+			*GetPeriodicEffectTypeLabel(AbilityDefinition->PeriodicEffect.EffectType),
+			*GetNameSafe(TargetActor),
+			AbilityDefinition->PeriodicEffect.Duration,
+			AbilityDefinition->PeriodicEffect.TickMagnitude,
+			AbilityDefinition->PeriodicEffect.TickInterval));
+	if (ExistingRuntime->bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(PeriodicEvent);
+	}
+
+	return EMABSAbilityActivationResult::Success;
+}
+
+EMABSAbilityActivationResult UMABSAbilityComponent::ApplyPeriodicEffectTick(
+	const FMABSActivePeriodicEffect& ActiveEffect,
+	FString& OutDebugMessage) const
+{
+	const UMABSAbilityDefinition* const AbilityDefinition = ActiveEffect.AbilityDefinition;
+	AActor* const SourceActor = ActiveEffect.SourceActor;
+	AActor* const TargetActor = ActiveEffect.TargetActor;
+	if (AbilityDefinition == nullptr || SourceActor == nullptr || TargetActor == nullptr)
+	{
+		OutDebugMessage = TEXT("Periodic effect tick failed because the effect source, target, or definition was invalid.");
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
+	}
+
+	switch (ActiveEffect.EffectType)
+	{
+	case EMABSPeriodicEffectType::DOT:
+		{
+			const float AppliedDamage = UGameplayStatics::ApplyDamage(
+				TargetActor,
+				ActiveEffect.TickMagnitude,
+				SourceActor->GetInstigatorController(),
+				SourceActor,
+				UDamageType::StaticClass());
+			if (AppliedDamage <= 0.0f)
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Periodic DOT tick failed on '%s'."),
+					*GetNameSafe(TargetActor));
+				return EMABSAbilityActivationResult::EffectApplicationFailed;
+			}
+
+			OutDebugMessage = FString::Printf(
+				TEXT("Periodic DOT tick applied %.2f damage to '%s'."),
+				AppliedDamage,
+				*GetNameSafe(TargetActor));
+			return EMABSAbilityActivationResult::Success;
+		}
+
+	case EMABSPeriodicEffectType::HOT:
+		{
+			if (!TargetActor->GetClass()->ImplementsInterface(UMABSInstantEffectReceiver::StaticClass()))
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Periodic HOT tick failed on '%s' because the target does not implement IMABSInstantEffectReceiver."),
+					*GetNameSafe(TargetActor));
+				return EMABSAbilityActivationResult::EffectApplicationFailed;
+			}
+
+			const bool bAppliedHeal = IMABSInstantEffectReceiver::Execute_ApplyMABSHeal(
+				TargetActor,
+				ActiveEffect.TickMagnitude,
+				SourceActor,
+				const_cast<UMABSAbilityDefinition*>(AbilityDefinition));
+			if (!bAppliedHeal)
+			{
+				OutDebugMessage = FString::Printf(
+					TEXT("Periodic HOT tick failed on '%s' because the target rejected the heal."),
+					*GetNameSafe(TargetActor));
+				return EMABSAbilityActivationResult::EffectApplicationFailed;
+			}
+
+			OutDebugMessage = FString::Printf(
+				TEXT("Periodic HOT tick applied %.2f healing to '%s'."),
+				ActiveEffect.TickMagnitude,
+				*GetNameSafe(TargetActor));
+			return EMABSAbilityActivationResult::Success;
+		}
+
+	default:
+		OutDebugMessage = TEXT("Periodic effect tick failed because the effect type was invalid.");
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
+	}
+}
+
+bool UMABSAbilityComponent::ApplyGameplayEffectsToTargets(
+	const FMABSAbilitySpec& AbilitySpec,
+	const TArray<AActor*>& TargetActors,
+	TArray<AActor*>& OutAffectedTargets,
+	FString& OutFailureMessage,
+	const bool bNotifyOwningClient)
+{
+	OutAffectedTargets.Reset();
+
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	if (AbilityDefinition == nullptr)
+	{
+		OutFailureMessage = TEXT("Gameplay effect application failed because the ability definition was invalid.");
+		return false;
+	}
+
+	if (TargetActors.IsEmpty())
+	{
+		OutFailureMessage = TEXT("Gameplay effect application failed because no valid targets were resolved.");
+		return false;
+	}
+
+	const bool bHasInstantEffect = HasInstantGameplayEffect(AbilityDefinition);
+	const bool bHasPeriodicEffect = HasPeriodicGameplayEffect(AbilityDefinition);
+	FString LastFailureMessage;
+	for (AActor* const TargetActor : TargetActors)
+	{
+		bool bAppliedToTarget = false;
+		bool bInstantApplied = false;
+
+		if (bHasInstantEffect)
+		{
+			FString EffectDebugMessage;
+			const EMABSAbilityActivationResult InstantResult = ApplyInstantEffect(AbilitySpec, TargetActor, EffectDebugMessage);
+			if (InstantResult == EMABSAbilityActivationResult::Success)
+			{
+				bAppliedToTarget = true;
+				bInstantApplied = true;
+
+				const FMABSAbilityDebugEvent EffectAppliedEvent = EmitDebugEvent(
+					MABSAbilityComponentEventNames::EffectApplied,
+					AbilitySpec.AbilityTag,
+					AbilitySpec.Handle,
+					AbilitySpec.RuntimeState,
+					EMABSAbilityActivationResult::Success,
+					EffectDebugMessage);
+				if (bNotifyOwningClient)
+				{
+					EmitDebugEventToOwningClient(EffectAppliedEvent);
+				}
+			}
+			else
+			{
+				LastFailureMessage = EffectDebugMessage;
+
+				const FMABSAbilityDebugEvent FailureEvent = EmitDebugEvent(
+					MABSAbilityComponentEventNames::EffectApplicationFailed,
+					AbilitySpec.AbilityTag,
+					AbilitySpec.Handle,
+					AbilitySpec.RuntimeState,
+					InstantResult,
+					EffectDebugMessage);
+				if (bNotifyOwningClient)
+				{
+					EmitDebugEventToOwningClient(FailureEvent);
+				}
+			}
+		}
+
+		if (bHasPeriodicEffect && (!bHasInstantEffect || bInstantApplied))
+		{
+			const EMABSAbilityActivationResult PeriodicResult = ApplyPeriodicEffect(AbilitySpec, TargetActor, bNotifyOwningClient);
+			if (PeriodicResult == EMABSAbilityActivationResult::Success)
+			{
+				bAppliedToTarget = true;
+			}
+			else
+			{
+				LastFailureMessage = FString::Printf(
+					TEXT("Failed to apply periodic effect to '%s'."),
+					*GetNameSafe(TargetActor));
+
+				const FMABSAbilityDebugEvent FailureEvent = EmitDebugEvent(
+					MABSAbilityComponentEventNames::EffectApplicationFailed,
+					AbilitySpec.AbilityTag,
+					AbilitySpec.Handle,
+					AbilitySpec.RuntimeState,
+					PeriodicResult,
+					LastFailureMessage);
+				if (bNotifyOwningClient)
+				{
+					EmitDebugEventToOwningClient(FailureEvent);
+				}
+			}
+		}
+
+		if (bAppliedToTarget)
+		{
+			OutAffectedTargets.Add(TargetActor);
+		}
+	}
+
+	if (OutAffectedTargets.IsEmpty())
+	{
+		OutFailureMessage = LastFailureMessage.IsEmpty()
+			? FString::Printf(
+				TEXT("Gameplay effect application failed for resolved targets: %s."),
+				*DescribeActorList(TargetActors))
+			: LastFailureMessage;
+		return false;
+	}
+
+	return true;
+}
+
 EMABSAbilityActivationResult UMABSAbilityComponent::HandleProjectileImpact(
 	AMABSProjectileBase& Projectile,
 	AActor* HitActor,
@@ -2265,56 +2978,76 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleProjectileImpact(
 		return EMABSAbilityActivationResult::DeliveryFailed;
 	}
 
-	FString ImpactDebugMessage;
-	FString RejectionReason;
-	if (!ValidateTargetActorForAbility(AbilityDefinition, SourceActor, HitActor, true, RejectionReason))
-	{
-		ImpactDebugMessage = HitActor == nullptr
-			? FString::Printf(
-				TEXT("Projectile impact was rejected at %s because no valid actor was hit."),
-				*FormatVectorForDebug(HitResult.ImpactPoint))
-			: FString::Printf(
-				TEXT("Projectile impact on '%s' was rejected: %s"),
-				*GetNameSafe(HitActor),
-				*RejectionReason);
+	FMABSAbilitySpec ProjectileSpec;
+	ProjectileSpec.AbilityDefinition = AbilityDefinition;
+	ProjectileSpec.AbilityTag = Projectile.GetSourceAbilityTag();
+	ProjectileSpec.Handle = Projectile.GetSourceAbilityHandle();
+	ProjectileSpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 
+	FMABSResolvedAbilityTarget ResolvedTarget;
+	ResolvedTarget.TargetActor = HitActor;
+	ResolvedTarget.ImpactHitResult = HitResult;
+	ResolvedTarget.bHasImpactHitResult = true;
+
+	TArray<AActor*> TargetActors;
+	if (AbilityDefinition->AoE.IsValid())
+	{
+		FString AoEDebugMessage;
+		if (!ResolveAoETargets(ProjectileSpec, ResolvedTarget, TargetActors, AoEDebugMessage, true))
+		{
+			const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+				MABSAbilityComponentEventNames::ProjectileImpactRejected,
+				Projectile.GetSourceAbilityTag(),
+				Projectile.GetSourceAbilityHandle(),
+				EMABSAbilityRuntimeState::Idle,
+				EMABSAbilityActivationResult::DeliveryFailed,
+				AoEDebugMessage);
+			EmitDebugEventToOwningClient(DebugEvent);
+			return EMABSAbilityActivationResult::DeliveryFailed;
+		}
+	}
+	else
+	{
+		FString RejectionReason;
+		if (!ValidateTargetActorForAbility(AbilityDefinition, SourceActor, HitActor, true, false, RejectionReason))
+		{
+			const FString ImpactDebugMessage = HitActor == nullptr
+				? FString::Printf(
+					TEXT("Projectile impact was rejected at %s because no valid actor was hit."),
+					*FormatVectorForDebug(HitResult.ImpactPoint))
+				: FString::Printf(
+					TEXT("Projectile impact on '%s' was rejected: %s"),
+					*GetNameSafe(HitActor),
+					*RejectionReason);
+
+			const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+				MABSAbilityComponentEventNames::ProjectileImpactRejected,
+				Projectile.GetSourceAbilityTag(),
+				Projectile.GetSourceAbilityHandle(),
+				EMABSAbilityRuntimeState::Idle,
+				EMABSAbilityActivationResult::DeliveryFailed,
+				ImpactDebugMessage);
+			EmitDebugEventToOwningClient(DebugEvent);
+			return EMABSAbilityActivationResult::DeliveryFailed;
+		}
+
+		TargetActors.Add(HitActor);
+	}
+
+	TArray<AActor*> AffectedTargets;
+	FString EffectFailureMessage;
+	if (!ApplyGameplayEffectsToTargets(ProjectileSpec, TargetActors, AffectedTargets, EffectFailureMessage, true))
+	{
 		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
 			MABSAbilityComponentEventNames::ProjectileImpactRejected,
 			Projectile.GetSourceAbilityTag(),
 			Projectile.GetSourceAbilityHandle(),
 			EMABSAbilityRuntimeState::Idle,
-			EMABSAbilityActivationResult::DeliveryFailed,
-			ImpactDebugMessage);
+			EMABSAbilityActivationResult::EffectApplicationFailed,
+			EffectFailureMessage);
 		EmitDebugEventToOwningClient(DebugEvent);
-		return EMABSAbilityActivationResult::DeliveryFailed;
+		return EMABSAbilityActivationResult::EffectApplicationFailed;
 	}
-
-	const EMABSAbilityActivationResult EffectResult = ApplyInstantEffectFromSource(
-		AbilityDefinition,
-		SourceActor,
-		HitActor,
-		ImpactDebugMessage);
-	if (EffectResult != EMABSAbilityActivationResult::Success)
-	{
-		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::ProjectileImpactRejected,
-			Projectile.GetSourceAbilityTag(),
-			Projectile.GetSourceAbilityHandle(),
-			EMABSAbilityRuntimeState::Idle,
-			EffectResult,
-			ImpactDebugMessage);
-		EmitDebugEventToOwningClient(DebugEvent);
-		return EffectResult;
-	}
-
-	const FMABSAbilityDebugEvent EffectAppliedEvent = EmitDebugEvent(
-		MABSAbilityComponentEventNames::EffectApplied,
-		Projectile.GetSourceAbilityTag(),
-		Projectile.GetSourceAbilityHandle(),
-		EMABSAbilityRuntimeState::Idle,
-		EMABSAbilityActivationResult::Success,
-		ImpactDebugMessage);
-	EmitDebugEventToOwningClient(EffectAppliedEvent);
 
 	TriggerProjectileImpactPresentation(
 		*AbilityDefinition,
@@ -2330,12 +3063,357 @@ EMABSAbilityActivationResult UMABSAbilityComponent::HandleProjectileImpact(
 		EMABSAbilityRuntimeState::Idle,
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
-			TEXT("Projectile impacted '%s' at %s and applied its effect."),
-			*GetNameSafe(HitActor),
-			*FormatVectorForDebug(HitResult.ImpactPoint)));
+			TEXT("Projectile impacted at %s and affected %d target(s): %s."),
+			*FormatVectorForDebug(HitResult.ImpactPoint),
+			AffectedTargets.Num(),
+			*DescribeActorList(AffectedTargets)));
 	EmitDebugEventToOwningClient(ProjectileImpactEvent);
 
 	return EMABSAbilityActivationResult::Success;
+}
+
+FMABSAbilitySpec* UMABSAbilityComponent::FindActiveComboSourceSpecForRequest(const FGameplayTag& RequestedAbilityTag)
+{
+	if (!RequestedAbilityTag.IsValid())
+	{
+		return nullptr;
+	}
+
+	FMABSAbilitySpec* BestMatch = nullptr;
+	float BestActivationStartTime = -1.0f;
+	for (FMABSAbilitySpec& AbilitySpec : GrantedAbilities)
+	{
+		if (AbilitySpec.AbilityDefinition == nullptr)
+		{
+			continue;
+		}
+
+		if (AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Idle
+			|| AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Blocked)
+		{
+			continue;
+		}
+
+		const bool bMatchesFollowupTag = AbilitySpec.AbilityDefinition->Combo.NextComboAbilityTag == RequestedAbilityTag;
+		const bool bMatchesActiveAbilityTag = AbilitySpec.AbilityTag == RequestedAbilityTag;
+		const bool bMatchesRoutingTag = AbilitySpec.ComboInputRoutingTag == RequestedAbilityTag;
+		if (!bMatchesFollowupTag && !bMatchesActiveAbilityTag && !bMatchesRoutingTag)
+		{
+			continue;
+		}
+
+		if (BestMatch == nullptr || AbilitySpec.ActivationStartTime >= BestActivationStartTime)
+		{
+			BestMatch = &AbilitySpec;
+			BestActivationStartTime = AbilitySpec.ActivationStartTime;
+		}
+	}
+
+	return BestMatch;
+}
+
+FMABSPeriodicEffectRuntime* UMABSAbilityComponent::FindPeriodicEffectRuntime(
+	const FMABSAbilitySpec& AbilitySpec,
+	AActor* TargetActor)
+{
+	AActor* const SourceActor = GetOwner();
+	for (TPair<int32, FMABSPeriodicEffectRuntime>& Pair : ActivePeriodicEffectRuntimes)
+	{
+		if (Pair.Value.State.AbilityHandle == AbilitySpec.Handle
+			&& Pair.Value.State.TargetActor == TargetActor
+			&& Pair.Value.State.SourceActor == SourceActor)
+		{
+			return &Pair.Value;
+		}
+	}
+
+	return nullptr;
+}
+
+bool UMABSAbilityComponent::HasAuthoredGameplayEffect(const UMABSAbilityDefinition* AbilityDefinition) const
+{
+	return HasInstantGameplayEffect(AbilityDefinition) || HasPeriodicGameplayEffect(AbilityDefinition);
+}
+
+bool UMABSAbilityComponent::HasInstantGameplayEffect(const UMABSAbilityDefinition* AbilityDefinition) const
+{
+	return AbilityDefinition != nullptr
+		&& AbilityDefinition->InstantEffectType != EMABSInstantEffectType::None
+		&& AbilityDefinition->EffectMagnitude > 0.0f;
+}
+
+bool UMABSAbilityComponent::HasPeriodicGameplayEffect(const UMABSAbilityDefinition* AbilityDefinition) const
+{
+	return AbilityDefinition != nullptr && AbilityDefinition->PeriodicEffect.IsValid();
+}
+
+bool UMABSAbilityComponent::ResolveAoECenterTransform(
+	const FMABSResolvedAbilityTarget& ResolvedTarget,
+	FTransform& OutCenterTransform) const
+{
+	if (ResolvedTarget.bHasImpactHitResult)
+	{
+		const FVector ImpactLocation = !ResolvedTarget.ImpactHitResult.ImpactPoint.IsNearlyZero()
+			? ResolvedTarget.ImpactHitResult.ImpactPoint
+			: ResolvedTarget.ImpactHitResult.Location;
+		const FRotator ImpactRotation = !ResolvedTarget.ImpactHitResult.ImpactNormal.IsNearlyZero()
+			? ResolvedTarget.ImpactHitResult.ImpactNormal.Rotation()
+			: (GetOwner() != nullptr ? GetOwner()->GetActorRotation() : FRotator::ZeroRotator);
+		OutCenterTransform = FTransform(ImpactRotation, ImpactLocation);
+		return true;
+	}
+
+	if (ResolvedTarget.TargetActor != nullptr)
+	{
+		OutCenterTransform = FTransform(
+			ResolvedTarget.TargetActor->GetActorRotation(),
+			ResolvedTarget.TargetActor->GetActorLocation());
+		return true;
+	}
+
+	if (const AActor* const Owner = GetOwner())
+	{
+		OutCenterTransform = FTransform(Owner->GetActorRotation(), Owner->GetActorLocation());
+		return true;
+	}
+
+	return false;
+}
+
+bool UMABSAbilityComponent::ResolveAoETargets(
+	const FMABSAbilitySpec& AbilitySpec,
+	const FMABSResolvedAbilityTarget& ResolvedTarget,
+	TArray<AActor*>& OutResolvedTargets,
+	FString& OutDebugMessage,
+	const bool bNotifyOwningClient)
+{
+	OutResolvedTargets.Reset();
+
+	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
+	AActor* const SourceActor = GetOwner();
+	UWorld* const World = GetWorld();
+	if (AbilityDefinition == nullptr || SourceActor == nullptr || World == nullptr || !AbilityDefinition->AoE.IsValid())
+	{
+		OutDebugMessage = TEXT("AoE target resolution failed because the ability definition, owner, world, or AoE data was invalid.");
+		return false;
+	}
+
+	FTransform CenterTransform = FTransform::Identity;
+	if (!ResolveAoECenterTransform(ResolvedTarget, CenterTransform))
+	{
+		OutDebugMessage = TEXT("AoE target resolution failed because no valid AoE center could be resolved.");
+		return false;
+	}
+
+	CenterTransform.AddToTranslation(CenterTransform.GetRotation().RotateVector(AbilityDefinition->AoE.Offset));
+
+	FCollisionShape AoEShape;
+	switch (AbilityDefinition->AoE.Shape)
+	{
+	case EMABSAoEShape::Box:
+		AoEShape = FCollisionShape::MakeBox(AbilityDefinition->AoE.BoxExtent);
+		break;
+
+	case EMABSAoEShape::Capsule:
+		AoEShape = FCollisionShape::MakeCapsule(
+			AbilityDefinition->AoE.CapsuleRadius,
+			AbilityDefinition->AoE.CapsuleHalfHeight);
+		break;
+
+	case EMABSAoEShape::Sphere:
+	default:
+		AoEShape = FCollisionShape::MakeSphere(AbilityDefinition->AoE.Radius);
+		break;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MABSAoEResolution), false);
+	const FCollisionObjectQueryParams ObjectQueryParams = MakeTargetTraceObjectQueryParams(true);
+
+	TArray<FOverlapResult> OverlapResults;
+	World->OverlapMultiByObjectType(
+		OverlapResults,
+		CenterTransform.GetLocation(),
+		CenterTransform.GetRotation(),
+		ObjectQueryParams,
+		AoEShape,
+		QueryParams);
+
+	TArray<AActor*> CandidateActors;
+	auto AddUniqueCandidate = [&CandidateActors](AActor* CandidateActor)
+	{
+		if (CandidateActor != nullptr && !CandidateActors.Contains(CandidateActor))
+		{
+			CandidateActors.Add(CandidateActor);
+		}
+	};
+
+	AddUniqueCandidate(ResolvedTarget.TargetActor);
+	for (const FOverlapResult& OverlapResult : OverlapResults)
+	{
+		AddUniqueCandidate(OverlapResult.GetActor());
+	}
+
+	const bool bAllowSelfTarget = AbilityDefinition->TargetType == EMABSTargetType::Self;
+	for (AActor* const CandidateActor : CandidateActors)
+	{
+		FString RejectionReason;
+		if (!ValidateTargetActorForAbility(AbilityDefinition, SourceActor, CandidateActor, true, bAllowSelfTarget, RejectionReason))
+		{
+			const FMABSAbilityDebugEvent RejectedEvent = EmitDebugEvent(
+				MABSAbilityComponentEventNames::AoETargetRejected,
+				AbilitySpec.AbilityTag,
+				AbilitySpec.Handle,
+				AbilitySpec.RuntimeState,
+				EMABSAbilityActivationResult::DeliveryFailed,
+				FString::Printf(
+					TEXT("AoE rejected actor '%s': %s"),
+					*GetNameSafe(CandidateActor),
+					*RejectionReason));
+			if (bNotifyOwningClient)
+			{
+				EmitDebugEventToOwningClient(RejectedEvent);
+			}
+			continue;
+		}
+
+		OutResolvedTargets.Add(CandidateActor);
+	}
+
+	OutDebugMessage = FString::Printf(
+		TEXT("Resolved %d AoE target(s) using %s centered at %s: %s."),
+		OutResolvedTargets.Num(),
+		*GetAoEShapeLabel(AbilityDefinition->AoE.Shape),
+		*FormatVectorForDebug(CenterTransform.GetLocation()),
+		*DescribeActorList(OutResolvedTargets));
+
+	const FMABSAbilityDebugEvent ResolvedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::AoEResolved,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		OutDebugMessage);
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(ResolvedEvent);
+	}
+
+	if (OutResolvedTargets.IsEmpty())
+	{
+		OutDebugMessage = FString::Printf(
+			TEXT("AoE resolved no valid targets using %s centered at %s."),
+			*GetAoEShapeLabel(AbilityDefinition->AoE.Shape),
+			*FormatVectorForDebug(CenterTransform.GetLocation()));
+		return false;
+	}
+
+	return true;
+}
+
+void UMABSAbilityComponent::RefreshActivePeriodicEffects()
+{
+	ActivePeriodicEffects.Reset(ActivePeriodicEffectRuntimes.Num());
+	for (const TPair<int32, FMABSPeriodicEffectRuntime>& Pair : ActivePeriodicEffectRuntimes)
+	{
+		ActivePeriodicEffects.Add(Pair.Value.State);
+	}
+
+	ActivePeriodicEffects.Sort([](const FMABSActivePeriodicEffect& Left, const FMABSActivePeriodicEffect& Right)
+	{
+		return Left.RuntimeId < Right.RuntimeId;
+	});
+}
+
+void UMABSAbilityComponent::TickPeriodicEffect(const int32 PeriodicEffectRuntimeId)
+{
+	FMABSPeriodicEffectRuntime* const Runtime = ActivePeriodicEffectRuntimes.Find(PeriodicEffectRuntimeId);
+	if (Runtime == nullptr)
+	{
+		return;
+	}
+
+	FString TickDebugMessage;
+	const EMABSAbilityActivationResult TickResult = ApplyPeriodicEffectTick(Runtime->State, TickDebugMessage);
+	if (TickResult != EMABSAbilityActivationResult::Success)
+	{
+		const FMABSAbilityDebugEvent ExpiredEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::PeriodicEffectExpired,
+			Runtime->State.AbilityTag,
+			Runtime->State.AbilityHandle,
+			EMABSAbilityRuntimeState::Idle,
+			TickResult,
+			FString::Printf(
+				TEXT("Expired %s on '%s' because a tick failed: %s"),
+				*GetPeriodicEffectTypeLabel(Runtime->State.EffectType),
+				*GetNameSafe(Runtime->State.TargetActor),
+				*TickDebugMessage));
+		if (Runtime->bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(ExpiredEvent);
+		}
+
+		if (UWorld* const World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(Runtime->TickTimerHandle);
+			World->GetTimerManager().ClearTimer(Runtime->ExpirationTimerHandle);
+		}
+
+		ActivePeriodicEffectRuntimes.Remove(PeriodicEffectRuntimeId);
+		RefreshActivePeriodicEffects();
+		return;
+	}
+
+	const float CurrentWorldTime = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0f;
+	const float RemainingDuration = FMath::Max(0.0f, Runtime->State.ExpirationWorldTime - CurrentWorldTime);
+	const FMABSAbilityDebugEvent TickEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::PeriodicEffectTick,
+		Runtime->State.AbilityTag,
+		Runtime->State.AbilityHandle,
+		EMABSAbilityRuntimeState::Idle,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("%s Remaining duration: %.2f seconds."),
+			*TickDebugMessage,
+			RemainingDuration));
+	if (Runtime->bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(TickEvent);
+	}
+}
+
+void UMABSAbilityComponent::ExpirePeriodicEffect(const int32 PeriodicEffectRuntimeId)
+{
+	FMABSPeriodicEffectRuntime* const Runtime = ActivePeriodicEffectRuntimes.Find(PeriodicEffectRuntimeId);
+	if (Runtime == nullptr)
+	{
+		return;
+	}
+
+	const FMABSActivePeriodicEffect ExpiringEffect = Runtime->State;
+	const bool bNotifyOwningClient = Runtime->bNotifyOwningClient;
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(Runtime->TickTimerHandle);
+		World->GetTimerManager().ClearTimer(Runtime->ExpirationTimerHandle);
+	}
+
+	ActivePeriodicEffectRuntimes.Remove(PeriodicEffectRuntimeId);
+	RefreshActivePeriodicEffects();
+
+	const FMABSAbilityDebugEvent ExpiredEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::PeriodicEffectExpired,
+		ExpiringEffect.AbilityTag,
+		ExpiringEffect.AbilityHandle,
+		EMABSAbilityRuntimeState::Idle,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Expired %s on '%s'."),
+			*GetPeriodicEffectTypeLabel(ExpiringEffect.EffectType),
+			*GetNameSafe(ExpiringEffect.TargetActor)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(ExpiredEvent);
+	}
 }
 
 bool UMABSAbilityComponent::ShouldValidateAbilityCost(const FMABSAbilitySpec& AbilitySpec) const
@@ -3998,6 +5076,7 @@ bool UMABSAbilityComponent::ValidateTargetActorForAbility(
 	const AActor* SourceActor,
 	const AActor* CandidateActor,
 	const bool bRequireValidActorTarget,
+	const bool bAllowSelfTarget,
 	FString& OutRejectionReason) const
 {
 	if (AbilityDefinition == nullptr)
@@ -4012,7 +5091,7 @@ bool UMABSAbilityComponent::ValidateTargetActorForAbility(
 		return false;
 	}
 
-	if (CandidateActor == SourceActor)
+	if (CandidateActor == SourceActor && !bAllowSelfTarget)
 	{
 		OutRejectionReason = TEXT("self actor hits are not valid targets for this ability.");
 		return false;
@@ -4023,30 +5102,34 @@ bool UMABSAbilityComponent::ValidateTargetActorForAbility(
 		return true;
 	}
 
-	switch (AbilityDefinition->InstantEffectType)
+	const bool bNeedsDamageValidation =
+		AbilityDefinition->InstantEffectType == EMABSInstantEffectType::Damage
+		|| (HasPeriodicGameplayEffect(AbilityDefinition)
+			&& AbilityDefinition->PeriodicEffect.EffectType == EMABSPeriodicEffectType::DOT);
+	const bool bNeedsHealValidation =
+		AbilityDefinition->InstantEffectType == EMABSInstantEffectType::Heal
+		|| (HasPeriodicGameplayEffect(AbilityDefinition)
+			&& AbilityDefinition->PeriodicEffect.EffectType == EMABSPeriodicEffectType::HOT);
+
+	if (!bNeedsDamageValidation && !bNeedsHealValidation)
 	{
-	case EMABSInstantEffectType::Damage:
-		if (CandidateActor->CanBeDamaged() || CandidateActor->IsA<APawn>())
-		{
-			return true;
-		}
-
-		OutRejectionReason = TEXT("the actor is not damageable and is not a pawn.");
-		return false;
-
-	case EMABSInstantEffectType::Heal:
-		if (CandidateActor->GetClass()->ImplementsInterface(UMABSInstantEffectReceiver::StaticClass()))
-		{
-			return true;
-		}
-
-		OutRejectionReason = TEXT("the actor does not implement IMABSInstantEffectReceiver.");
-		return false;
-
-	default:
-		OutRejectionReason = TEXT("the authored instant effect type does not support actor validation.");
+		OutRejectionReason = TEXT("the ability does not author a supported target validation effect.");
 		return false;
 	}
+
+	if (bNeedsDamageValidation && !(CandidateActor->CanBeDamaged() || CandidateActor->IsA<APawn>()))
+	{
+		OutRejectionReason = TEXT("the actor is not damageable and is not a pawn.");
+		return false;
+	}
+
+	if (bNeedsHealValidation && !CandidateActor->GetClass()->ImplementsInterface(UMABSInstantEffectReceiver::StaticClass()))
+	{
+		OutRejectionReason = TEXT("the actor does not implement IMABSInstantEffectReceiver.");
+		return false;
+	}
+
+	return true;
 }
 
 void UMABSAbilityComponent::DrawTargetTraceDebug(
@@ -4129,4 +5212,9 @@ bool UMABSAbilityComponent::CanMutateAbilityState() const
 FMABSAbilityHandle UMABSAbilityComponent::MakeNextAbilityHandle()
 {
 	return FMABSAbilityHandle(NextAbilityHandleValue++);
+}
+
+int32 UMABSAbilityComponent::MakeNextPeriodicEffectRuntimeId()
+{
+	return NextPeriodicEffectRuntimeIdValue++;
 }

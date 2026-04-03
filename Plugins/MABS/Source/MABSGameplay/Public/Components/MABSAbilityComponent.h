@@ -28,7 +28,10 @@ struct FMABSAbilityExecutionContext
 {
 	FTimerHandle DeliveryTimerHandle;
 	FTimerHandle RecoveryTimerHandle;
+	FTimerHandle ComboWindowStartTimerHandle;
+	FTimerHandle ComboWindowEndTimerHandle;
 	bool bNotifyOwningClient = false;
+	bool bIsComboWindowOpen = false;
 };
 
 struct FMABSResolvedAbilityTarget
@@ -36,6 +39,14 @@ struct FMABSResolvedAbilityTarget
 	AActor* TargetActor = nullptr;
 	FHitResult ImpactHitResult;
 	bool bHasImpactHitResult = false;
+};
+
+struct FMABSPeriodicEffectRuntime
+{
+	FMABSActivePeriodicEffect State;
+	FTimerHandle TickTimerHandle;
+	FTimerHandle ExpirationTimerHandle;
+	bool bNotifyOwningClient = false;
 };
 
 UCLASS(ClassGroup=(MABS), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
@@ -85,6 +96,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	FMABSTargetTraceDebugInfo GetLatestTargetTraceDebugInfo() const;
 
+	UFUNCTION(BlueprintPure, Category="MABS|Effects")
+	TArray<FMABSActivePeriodicEffect> GetActivePeriodicEffects() const;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Debug")
 	void SetDebugReplicationEnabled(bool bEnabled);
 
@@ -104,6 +118,9 @@ protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Debug", Transient)
 	FMABSTargetTraceDebugInfo LatestTargetTraceDebugInfo;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Effects", Transient)
+	TArray<FMABSActivePeriodicEffect> ActivePeriodicEffects;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MABS|Debug", meta=(ClampMin="1"))
 	int32 MaxStoredDebugEvents = 32;
@@ -139,13 +156,25 @@ private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastSpawnTracerPresentation(const FMABSTracerCueEvent& TracerEvent);
 
-	EMABSAbilityActivationResult HandleTryActivateAbility(const FGameplayTag& AbilityTag, bool bNotifyOwningClient);
+	EMABSAbilityActivationResult HandleTryActivateAbility(
+		const FGameplayTag& AbilityTag,
+		bool bNotifyOwningClient,
+		const FGameplayTag& ComboInputRoutingTag);
 
 	EMABSAbilityActivationResult CanActivateAbility(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage) const;
 
-	EMABSAbilityActivationResult BeginAbilityStartup(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+	EMABSAbilityActivationResult TryQueueComboFollowup(const FGameplayTag& RequestedAbilityTag, bool bNotifyOwningClient);
+
+	EMABSAbilityActivationResult BeginAbilityStartup(
+		FMABSAbilitySpec& AbilitySpec,
+		bool bNotifyOwningClient,
+		const FGameplayTag& ComboInputRoutingTag);
 
 	void TriggerScheduledAbilityDelivery(FMABSAbilityHandle AbilityHandle);
+
+	void OpenComboWindow(FMABSAbilityHandle AbilityHandle);
+
+	void CloseComboWindow(FMABSAbilityHandle AbilityHandle);
 
 	void BeginAbilityRecovery(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
 
@@ -207,6 +236,15 @@ private:
 		AActor* TargetActor,
 		FString& OutDebugMessage) const;
 
+	EMABSAbilityActivationResult ApplyPeriodicEffect(
+		const FMABSAbilitySpec& AbilitySpec,
+		AActor* TargetActor,
+		bool bNotifyOwningClient);
+
+	EMABSAbilityActivationResult ApplyPeriodicEffectTick(
+		const FMABSActivePeriodicEffect& ActiveEffect,
+		FString& OutDebugMessage) const;
+
 	EMABSAbilityActivationResult HandleProjectileImpact(
 		AMABSProjectileBase& Projectile,
 		AActor* HitActor,
@@ -222,6 +260,10 @@ private:
 
 	const FMABSCooldownGroupState* FindCooldownGroupStateInternal(const FGameplayTag& CooldownGroupTag) const;
 
+	FMABSAbilitySpec* FindActiveComboSourceSpecForRequest(const FGameplayTag& RequestedAbilityTag);
+
+	FMABSPeriodicEffectRuntime* FindPeriodicEffectRuntime(const FMABSAbilitySpec& AbilitySpec, AActor* TargetActor);
+
 	void ResetAbilityToIdle(FMABSAbilityHandle AbilityHandle);
 
 	void PruneExpiredCooldownGroupStates();
@@ -229,6 +271,30 @@ private:
 	float GetCooldownRemainingForAbilitySpec(const FMABSAbilitySpec& AbilitySpec) const;
 
 	float GetCooldownGroupRemainingInternal(const FGameplayTag& CooldownGroupTag) const;
+
+	bool HasAuthoredGameplayEffect(const UMABSAbilityDefinition* AbilityDefinition) const;
+
+	bool HasInstantGameplayEffect(const UMABSAbilityDefinition* AbilityDefinition) const;
+
+	bool HasPeriodicGameplayEffect(const UMABSAbilityDefinition* AbilityDefinition) const;
+
+	bool ResolveAoECenterTransform(
+		const FMABSResolvedAbilityTarget& ResolvedTarget,
+		FTransform& OutCenterTransform) const;
+
+	bool ResolveAoETargets(
+		const FMABSAbilitySpec& AbilitySpec,
+		const FMABSResolvedAbilityTarget& ResolvedTarget,
+		TArray<AActor*>& OutResolvedTargets,
+		FString& OutDebugMessage,
+		bool bNotifyOwningClient);
+
+	bool ApplyGameplayEffectsToTargets(
+		const FMABSAbilitySpec& AbilitySpec,
+		const TArray<AActor*>& TargetActors,
+		TArray<AActor*>& OutAffectedTargets,
+		FString& OutFailureMessage,
+		bool bNotifyOwningClient);
 
 	bool ShouldValidateAbilityCost(const FMABSAbilitySpec& AbilitySpec) const;
 
@@ -261,6 +327,12 @@ private:
 	void EmitLatestTargetTraceDebugInfoToOwningClient(const FMABSTargetTraceDebugInfo& DebugInfo);
 
 	void ClearLatestTargetTraceDebugInfo(bool bNotifyOwningClient);
+
+	void RefreshActivePeriodicEffects();
+
+	void TickPeriodicEffect(int32 PeriodicEffectRuntimeId);
+
+	void ExpirePeriodicEffect(int32 PeriodicEffectRuntimeId);
 
 	bool GetTargetTraceViewPoint(FVector& OutTraceStart, FRotator& OutTraceRotation, FString& OutViewPointDescription) const;
 
@@ -368,6 +440,7 @@ private:
 		const AActor* SourceActor,
 		const AActor* CandidateActor,
 		bool bRequireValidActorTarget,
+		bool bAllowSelfTarget,
 		FString& OutRejectionReason) const;
 
 	void DrawTargetTraceDebug(const UMABSAbilityDefinition& AbilityDefinition, const FMABSTargetTraceDebugInfo& DebugInfo) const;
@@ -376,9 +449,15 @@ private:
 
 	FMABSAbilityHandle MakeNextAbilityHandle();
 
+	int32 MakeNextPeriodicEffectRuntimeId();
+
 	int32 NextAbilityHandleValue = 1;
 
+	int32 NextPeriodicEffectRuntimeIdValue = 1;
+
 	TMap<FMABSAbilityHandle, FMABSAbilityExecutionContext> ActiveAbilityExecutionContexts;
+
+	TMap<int32, FMABSPeriodicEffectRuntime> ActivePeriodicEffectRuntimes;
 
 	TMap<TObjectPtr<UNiagaraSystem>, TArray<TWeakObjectPtr<UNiagaraComponent>>> ReusableCueVFXPool;
 

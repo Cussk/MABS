@@ -2,13 +2,13 @@
 
 ## What it is
 
-This document explains the current Phase 6 ability model: authored definitions, granted runtime specs, timing-driven execution, socket-aware delivery, optional montage playback, and the first built-in presentation layer.
+This document explains the current Phase 7 ability model: authored definitions, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional montage playback, and presentation.
 
 ## Why it exists
 
 MABS stays readable by keeping authored data separate from live runtime state.
 
-Phase 6 keeps that split intact while extending authored abilities with grouped presentation data instead of scattering cosmetic fields across gameplay code.
+Phase 7 extends the Phase 6.5 model without turning it into a large effect-spec framework. Combos, AoE, and periodic effects are grouped authored data on the ability definition, while runtime timing, combo queueing, and active periodic entries stay on the ability component side.
 
 ## Ability definitions
 
@@ -17,11 +17,12 @@ Phase 6 keeps that split intact while extending authored abilities with grouped 
 Current authored fields cover:
 
 * identity and activation: `AbilityTag`, `DisplayName`, `ActivationPolicy`
-* target intent and effect: `TargetType`, `InstantEffectType`, `EffectMagnitude`
+* target intent and gameplay outcome: `TargetType`, `InstantEffectType`, `EffectMagnitude`
 * usage rules: `CooldownSeconds`, `CooldownGroupTag`, `ResourceCost`
 * timing: `StartupDuration`, `DeliveryTime`, `RecoveryDuration`
 * delivery and sockets: `DeliveryMode`, delivery socket fields, offsets, and optional montage fields
 * presentation: `StartupPresentation`, `DeliveryPresentation`, and `ImpactPresentation`
+* combat breadth: `Combo`, `AoE`, and `PeriodicEffect`
 
 Current delivery modes are:
 
@@ -32,22 +33,15 @@ Current delivery modes are:
 
 ## Presentation authoring
 
-Phase 6 adds grouped presentation data:
+Presentation still uses grouped data:
 
-* `StartupPresentation.Cue` for cast or windup presentation
-* `DeliveryPresentation.Cue` for muzzle, spawn, or release presentation
-* `DeliveryPresentation.HitTraceTracer` for hit-trace travel presentation
-* `DeliveryPresentation.ProjectileTravel` for projectile-attached travel presentation
-* `ImpactPresentation.Cue` for successful hit or effect presentation
+* `StartupPresentation.Cue`
+* `DeliveryPresentation.Cue`
+* `DeliveryPresentation.HitTraceTracer`
+* `DeliveryPresentation.ProjectileTravel`
+* `ImpactPresentation.Cue`
 
-Each shared cue can author:
-
-* `VFX`
-* `SFX`
-* `CameraShake`
-* `SocketName`
-* `LocationOffset`
-* `RotationOffset`
+Phase 7 does not change the cue model. Combo, AoE, and periodic effects plug into the same gameplay timing and debug flow.
 
 ## Granted abilities
 
@@ -64,27 +58,30 @@ Each spec stores:
 * the activation start timestamp
 * the scheduled delivery timestamp
 * the recovery end timestamp
-
-Phase 6 does not add cosmetic runtime state to the spec. Presentation stays transient and is triggered from the existing execution flow.
+* the combo window start time
+* the combo window end time
+* the queued combo follow-up tag, when one has been buffered
 
 ## Activation flow
 
-Activation in Phase 6 means:
+Activation in Phase 7 means:
 
 1. code or input calls `TryActivateAbilityByTag`
 2. the request reaches authority
-3. the component validates grant, cooldown, and cost rules
-4. the granted spec enters `Startup`
-5. startup presentation triggers if authored
-6. the component optionally requests montage playback
-7. delivery executes at the authored delivery time
-8. delivery presentation triggers at that same timing point
-9. `HitTrace` may also spawn a tracer from the resolved trace path
-10. `Direct`, `HitTrace`, and `Melee` apply the instant effect on successful delivery
-11. impact presentation triggers after successful effect application
-12. `Projectile` commits on successful spawn, then the replicated projectile handles travel presentation locally and impact presentation later on hit
-13. authority spends cost and starts cooldown on successful commit
-14. the granted spec enters `Recovery` and later returns to `Idle`
+3. combo follow-up requests may be queued against an already active melee ability
+4. authority validates grant, cooldown, cost, and authored gameplay effect data
+5. the granted spec enters `Startup`
+6. startup presentation triggers if authored
+7. the component optionally requests montage playback
+8. delivery executes at the authored delivery time
+9. delivery presentation triggers at that same timing point
+10. the server resolves the primary impact context
+11. optional AoE gathers the final actor set
+12. instant effects apply immediately to affected targets
+13. optional periodic effects start or refresh on affected targets
+14. impact presentation triggers after successful application
+15. authority spends cost, starts cooldown, and enters `Recovery`
+16. queued combo follow-ups start automatically when the current ability completes recovery
 
 ## Runtime state versus authored data
 
@@ -92,40 +89,53 @@ Authored data answers:
 
 * what the ability should do
 * which delivery mode it uses
-* how timing is configured
-* which sockets or offsets delivery and presentation should use
-* whether montage playback should be requested
-* which startup, delivery, tracer, travel, and impact assets should play
+* whether it can branch into a combo follow-up
+* whether it resolves an AoE shape
+* whether it starts a periodic effect
+* how timing, sockets, montage playback, and presentation are configured
 
 Runtime state answers:
 
 * whether the ability is granted
-* whether it is idle, in startup, active, in recovery, or blocked
+* whether it is idle, in startup, active, recovery, or blocked
 * what happened on the last activation request
 * when its personal cooldown ends
 * when startup began
 * when delivery is scheduled
 * when recovery ends
-* which cooldown groups are active on the owner
-
-Projectile travel presentation remains transient state on the spawned projectile actor, not on the data asset or the ability spec.
+* whether a combo window is open and which follow-up has been queued
+* which periodic effects are currently active on authority
 
 ## How to use it
 
 1. Create a `UMABSAbilityDefinition`.
-2. Set `TargetType`, `DeliveryMode`, `InstantEffectType`, and `EffectMagnitude`.
-3. Configure cooldown, cost, timing, and delivery sockets.
-4. Fill the presentation groups that matter for that delivery mode.
-5. Grant the ability on authority.
-6. Activate it with `TryActivateAbilityByTag`.
-7. Inspect `FMABSAbilitySpec`, recent debug events, and the overlay.
+2. Set `TargetType`, `DeliveryMode`, timing, cost, and cooldown data.
+3. Configure instant effect, periodic effect, or both.
+4. Fill `Combo` when authoring a melee follow-up chain.
+5. Fill `AoE` when the ability should affect more than one actor.
+6. Fill the presentation groups that matter for that delivery mode.
+7. Grant the ability on authority.
+8. Activate it with `TryActivateAbilityByTag`.
+9. Inspect `FMABSAbilitySpec`, active periodic effects, recent debug events, and the overlay.
 
 ## Example
 
-Example rifle shot:
+Example three-hit sword opener:
 
-* `DeliveryMode = HitTrace`
-* `HitTraceOriginSocketName = Muzzle`
-* `DeliveryPresentation.Cue.VFX = P_RifleMuzzle`
-* `DeliveryPresentation.HitTraceTracer.TracerVFX = P_RifleTracer`
-* `ImpactPresentation.Cue.VFX = P_BulletImpact`
+* `DeliveryMode = Melee`
+* `Combo.NextComboAbilityTag = Ability.Combat.Attack2`
+* `Combo.ComboWindowStart = 0.18`
+* `Combo.ComboWindowEnd = 0.42`
+* `Combo.bBufferComboInput = true`
+
+Example explosive fireball:
+
+* `DeliveryMode = Projectile`
+* `AoE.bEnabled = true`
+* `AoE.Shape = Sphere`
+* `AoE.Radius = 250`
+* `PeriodicEffect.bEnabled = true`
+* `PeriodicEffect.EffectType = DOT`
+* `PeriodicEffect.Duration = 4.0`
+* `PeriodicEffect.TickInterval = 1.0`
+* `PeriodicEffect.TickMagnitude = 6.0`

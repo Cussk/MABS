@@ -2,42 +2,55 @@
 
 ## What it is
 
-This document explains how Phase 6.5 handles multiplayer authority for activation, delivery, projectile runtime, costs, cooldowns, cue routing, and cosmetic realization.
+This document explains how Phase 7 handles multiplayer authority for activation, delivery, combo acceptance, AoE target resolution, periodic effects, costs, cooldowns, projectile runtime, cue routing, and cosmetic realization.
 
 ## Why it exists
 
-Presentation is cosmetic, but cue routing still has multiplayer rules. If those rules are not explicit, it is easy to accidentally mix gameplay authority with cosmetic visibility.
+Phase 7 adds more combat breadth, but the same rule still holds: gameplay results must stay authoritative on the server, while clients get enough replicated state and debug visibility to understand what happened.
 
 ## Server authority
 
-The server still owns:
+The server owns:
 
 * granting
 * cooldown validation
 * cost validation and spending
+* combo window timing and combo acceptance
 * direct target resolution
 * hit-trace and melee hit resolution
+* AoE overlap gathering and target validation
 * projectile spawn
 * projectile impact
-* damage and heal application
+* instant damage and heal application
+* periodic effect application
+* periodic ticking and expiration
 * presentation timing decisions
+
+## Client behavior
+
+Clients may request:
+
+* ability activation
+* combo follow-up input
+
+Clients do not authoritatively decide:
+
+* whether a combo request was valid
+* which AoE actors were accepted
+* when periodic ticks happen
+* when periodic effects expire
 
 ## Cue routing in multiplayer
 
 Authority still decides when startup, delivery, tracer, projectile travel, and impact happen.
 
-Phase 6.5 then routes cosmetics through a small visibility policy:
+The visibility policy model from Phase 6.5 still applies:
 
 * `RelevantClients`
 * `OwnerOnly`
 * `LocalOnly`
 
-Practical behavior:
-
-* `RelevantClients` uses the normal cosmetic multicast path
-* `OwnerOnly` routes only to the owning client when one exists
-* `OwnerOnly` falls back to `RelevantClients` if no owning client exists
-* `LocalOnly` stays local and does not become a gameplay fact
+Combo, AoE, and periodic effects do not change that cosmetic routing model.
 
 ## Dedicated server behavior
 
@@ -46,42 +59,26 @@ Dedicated servers:
 * still make authoritative gameplay decisions
 * still route cosmetic results outward when needed
 * do not realize local VFX, SFX, or camera shake
-* skip local-only cue realization completely
-
-That keeps gameplay correct without wasting server time on local cosmetic work.
-
-## Projectile travel behavior
-
-Projectile travel cues still come from the replicated projectile actor.
-
-Phase 6.5 changes that path so the projectile evaluates a lightweight travel cue payload and applies the same small visibility-policy model locally on each instance.
-
-## Runtime overlay
-
-`AMABSDebugHUD` is still local runtime UI only. It does not make gameplay decisions.
-
-It now helps explain:
-
-* whether a cue was routed, skipped, or realized
-* whether a policy fallback was used
-* the latest authoritative trace or sweep snapshot
-* replicated ability runtime summaries
+* still run combo timers and periodic timers authoritatively
 
 ## Verification checklist
 
 Singleplayer:
 
-* startup, delivery, tracer, projectile travel, and impact cues all realize
-* local-only cues still work
+* combo follow-ups queue and auto-trigger correctly
+* AoE hits multiple valid actors
+* periodic ticks and expiration are readable
 
 Listen server:
 
-* host sees routed and realized cue timing correctly
-* remote client requests still resolve on authority
-* owner-only cues only appear for the owning player
+* host combo behavior works correctly
+* remote combo requests are validated on authority
+* AoE remains authoritative
+* periodic ticks remain authoritative
 
 Dedicated server:
 
-* gameplay remains authoritative
-* local-only cues are skipped cleanly
+* combo acceptance remains authoritative
+* AoE resolution remains authoritative
+* periodic ticking remains authoritative
 * server builds do not depend on cosmetic realization

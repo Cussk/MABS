@@ -58,6 +58,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation|Impact")
 	FMABSPresentationImpactData ImpactPresentation;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combat")
+	FMABSComboData Combo;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combat")
+	FMABSAoEData AoE;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combat")
+	FMABSPeriodicEffectData PeriodicEffect;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.0"))
 	float TargetTraceDistance = 1500.0f;
 

@@ -7,12 +7,14 @@
 #include "MABSAbilityTypes.generated.h"
 
 class UMABSAbilityDefinition;
+class AActor;
 
 UENUM(BlueprintType)
 enum class EMABSAbilityActivationResult : uint8
 {
 	None UMETA(DisplayName="None"),
 	Success UMETA(DisplayName="Success"),
+	ComboQueued UMETA(DisplayName="Combo Queued"),
 	RequestSentToServer UMETA(DisplayName="Request Sent To Server"),
 	InvalidAbility UMETA(DisplayName="Invalid Ability"),
 	NotGranted UMETA(DisplayName="Not Granted"),
@@ -20,6 +22,7 @@ enum class EMABSAbilityActivationResult : uint8
 	Blocked UMETA(DisplayName="Blocked"),
 	OnCooldown UMETA(DisplayName="On Cooldown"),
 	InsufficientResources UMETA(DisplayName="Insufficient Resources"),
+	ComboRejected UMETA(DisplayName="Combo Rejected"),
 	AuthorityRejected UMETA(DisplayName="Authority Rejected"),
 	DeliveryFailed UMETA(DisplayName="Delivery Failed"),
 	TargetResolutionFailed UMETA(DisplayName="Target Resolution Failed"),
@@ -75,6 +78,120 @@ enum class EMABSInstantEffectType : uint8
 	None UMETA(DisplayName="None"),
 	Damage UMETA(DisplayName="Damage"),
 	Heal UMETA(DisplayName="Heal")
+};
+
+UENUM(BlueprintType)
+enum class EMABSAoEShape : uint8
+{
+	Sphere UMETA(DisplayName="Sphere"),
+	Box UMETA(DisplayName="Box"),
+	Capsule UMETA(DisplayName="Capsule")
+};
+
+UENUM(BlueprintType)
+enum class EMABSPeriodicEffectType : uint8
+{
+	DOT UMETA(DisplayName="DOT"),
+	HOT UMETA(DisplayName="HOT")
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSComboData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combo", meta=(Categories="Ability"))
+	FGameplayTag NextComboAbilityTag;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combo", meta=(ClampMin="0.0"))
+	float ComboWindowStart = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combo", meta=(ClampMin="0.0"))
+	float ComboWindowEnd = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combo")
+	bool bBufferComboInput = true;
+
+	bool IsEnabled() const
+	{
+		return NextComboAbilityTag.IsValid() && ComboWindowEnd > ComboWindowStart;
+	}
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSAoEData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="AoE")
+	bool bEnabled = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="AoE", meta=(EditCondition="bEnabled", EditConditionHides))
+	EMABSAoEShape Shape = EMABSAoEShape::Sphere;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="AoE", meta=(ClampMin="0.0", EditCondition="bEnabled && Shape == EMABSAoEShape::Sphere", EditConditionHides))
+	float Radius = 200.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="AoE", meta=(EditCondition="bEnabled && Shape == EMABSAoEShape::Box", EditConditionHides))
+	FVector BoxExtent = FVector(150.0f, 150.0f, 150.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="AoE", meta=(ClampMin="0.0", EditCondition="bEnabled && Shape == EMABSAoEShape::Capsule", EditConditionHides))
+	float CapsuleRadius = 150.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="AoE", meta=(ClampMin="0.0", EditCondition="bEnabled && Shape == EMABSAoEShape::Capsule", EditConditionHides))
+	float CapsuleHalfHeight = 150.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="AoE", meta=(EditCondition="bEnabled", EditConditionHides))
+	FVector Offset = FVector::ZeroVector;
+
+	bool IsValid() const
+	{
+		if (!bEnabled)
+		{
+			return false;
+		}
+
+		switch (Shape)
+		{
+		case EMABSAoEShape::Sphere:
+			return Radius > 0.0f;
+
+		case EMABSAoEShape::Box:
+			return BoxExtent.GetMax() > 0.0f;
+
+		case EMABSAoEShape::Capsule:
+			return CapsuleRadius > 0.0f && CapsuleHalfHeight > 0.0f;
+
+		default:
+			return false;
+		}
+	}
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSPeriodicEffectData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Periodic")
+	bool bEnabled = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Periodic", meta=(EditCondition="bEnabled", EditConditionHides))
+	EMABSPeriodicEffectType EffectType = EMABSPeriodicEffectType::DOT;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Periodic", meta=(ClampMin="0.0", EditCondition="bEnabled", EditConditionHides))
+	float Duration = 3.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Periodic", meta=(ClampMin="0.01", EditCondition="bEnabled", EditConditionHides))
+	float TickInterval = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Periodic", meta=(ClampMin="0.0", EditCondition="bEnabled", EditConditionHides))
+	float TickMagnitude = 5.0f;
+
+	bool IsValid() const
+	{
+		return bEnabled && Duration > 0.0f && TickInterval > 0.0f && TickMagnitude > 0.0f;
+	}
 };
 
 USTRUCT(BlueprintType)
@@ -144,6 +261,18 @@ struct MABSCORE_API FMABSAbilitySpec
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
 	float RecoveryEndTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	float ComboWindowStartTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	float ComboWindowEndTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	FGameplayTag QueuedComboAbilityTag;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
+	FGameplayTag ComboInputRoutingTag;
 };
 
 USTRUCT(BlueprintType)
@@ -156,4 +285,43 @@ struct MABSCORE_API FMABSCooldownGroupState
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ability")
 	float CooldownEndTime = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct MABSCORE_API FMABSActivePeriodicEffect
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	int32 RuntimeId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	FGameplayTag AbilityTag;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	FMABSAbilityHandle AbilityHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	TObjectPtr<UMABSAbilityDefinition> AbilityDefinition = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	TObjectPtr<AActor> SourceActor = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	TObjectPtr<AActor> TargetActor = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	EMABSPeriodicEffectType EffectType = EMABSPeriodicEffectType::DOT;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	float TickMagnitude = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	float TickInterval = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	float AppliedWorldTime = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Periodic")
+	float ExpirationWorldTime = 0.0f;
 };

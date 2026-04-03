@@ -107,14 +107,37 @@ FString UMABSDebugBlueprintLibrary::FormatAbilitySpecRuntimeSummary(const FMABSA
 		}
 	}
 
+	FString ComboText;
+	if (AbilitySpec.ComboWindowEndTime > AbilitySpec.ComboWindowStartTime)
+	{
+		if (CurrentWorldTimeSeconds < AbilitySpec.ComboWindowStartTime)
+		{
+			ComboText += FString::Printf(
+				TEXT(" ComboIn=%.2fs"),
+				FMath::Max(0.0f, AbilitySpec.ComboWindowStartTime - CurrentWorldTimeSeconds));
+		}
+		else
+		{
+			ComboText += FString::Printf(
+				TEXT(" ComboOpen=%.2fs"),
+				FMath::Max(0.0f, AbilitySpec.ComboWindowEndTime - CurrentWorldTimeSeconds));
+		}
+	}
+
+	if (AbilitySpec.QueuedComboAbilityTag.IsValid())
+	{
+		ComboText += TEXT(" QueuedCombo=") + AbilitySpec.QueuedComboAbilityTag.ToString();
+	}
+
 	return FString::Printf(
-		TEXT("[Ability] Tag=%s State=%s Result=%s Cooldown=%s%s%s%s"),
+		TEXT("[Ability] Tag=%s State=%s Result=%s Cooldown=%s%s%s%s%s"),
 		*AbilitySpec.AbilityTag.ToString(),
 		*RuntimeStateName,
 		*ResultName,
 		*CooldownText,
 		*TimingText,
 		*DeliveryModeText,
+		*ComboText,
 		*CooldownGroupText);
 }
 
@@ -125,6 +148,9 @@ FLinearColor UMABSDebugBlueprintLibrary::GetAbilityDebugEventColor(const FMABSAb
 	case EMABSAbilityActivationResult::Success:
 	case EMABSAbilityActivationResult::RequestSentToServer:
 		return FLinearColor(0.2f, 0.85f, 0.35f, 1.0f);
+
+	case EMABSAbilityActivationResult::ComboQueued:
+		return FLinearColor(0.25f, 0.65f, 0.95f, 1.0f);
 
 	case EMABSAbilityActivationResult::None:
 		return FLinearColor(0.95f, 0.85f, 0.25f, 1.0f);
@@ -185,7 +211,11 @@ FLinearColor UMABSDebugBlueprintLibrary::GetAbilitySpecRuntimeColor(const FMABSA
 	case EMABSAbilityActivationResult::Success:
 		return FLinearColor(0.2f, 0.85f, 0.35f, 1.0f);
 
+	case EMABSAbilityActivationResult::ComboQueued:
+		return FLinearColor(0.25f, 0.65f, 0.95f, 1.0f);
+
 	case EMABSAbilityActivationResult::OnCooldown:
+	case EMABSAbilityActivationResult::ComboRejected:
 	case EMABSAbilityActivationResult::InsufficientResources:
 	case EMABSAbilityActivationResult::EffectApplicationFailed:
 	case EMABSAbilityActivationResult::TargetResolutionFailed:

@@ -2,11 +2,11 @@
 
 ## What it is
 
-This document explains the current Phase 6.5 module layout for MABS after lightweight presentation cue routing was added.
+This document explains the current Phase 7 module layout for MABS after combo, AoE, and periodic runtime support were added.
 
 ## Why it exists
 
-Phase 6.5 adds new shared cue types and routing behavior, but the module split still keeps authored data, runtime execution, and debug display separate and readable.
+Phase 7 adds new combat data and more authority-side runtime work, but the module split still keeps authored data, runtime execution, and debug display separate and readable.
 
 ## Module map
 
@@ -19,12 +19,12 @@ Owns:
 * authored timing fields
 * authored socket fields
 * authored montage references
-* authored presentation structs and fields, including Niagara VFX references
-* `EMABSPresentationCueVisibilityPolicy`
-* `EMABSPresentationCuePhase`
-* `FMABSPresentationCueEvent`
-* `FMABSTracerCueEvent`
-* `FMABSProjectileTravelCueEvent`
+* authored presentation structs and fields
+* authored combo data
+* authored AoE data
+* authored periodic effect data
+* `FMABSAbilitySpec`
+* `FMABSActivePeriodicEffect`
 * shared debug structs
 
 ### `MABSGameplay`
@@ -33,15 +33,17 @@ Owns:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
-* timer-based startup, delivery, and recovery scheduling
+* timer-based startup, delivery, recovery, combo, and periodic scheduling
+* authority-side combo queueing
+* authority-side AoE resolution
+* authority-side instant and periodic effect application
+* periodic reapply refresh behavior
 * socket transform resolution
 * montage request hooks
 * authority-side delivery execution
 * cue routing helpers for startup, delivery, tracer, travel, and impact
 * owner-only, local-only, and relevant-client cue handling
 * local cue realization helpers
-* pooling-friendly Niagara reuse for repeated world cues and tracers
-* projectile travel cue hookup on the replicated projectile actor
 * instant effects
 * cooldown and cost integration
 * replication and cosmetic routing
@@ -52,7 +54,7 @@ Owns:
 
 * runtime-safe debug formatting
 * the HUD overlay
-* display of timing state, trace state, and recent cue-routing events
+* display of timing state, combo queue state, trace state, and recent combo / AoE / periodic events
 
 ### `MABSEditor`
 
@@ -69,5 +71,3 @@ Current dependency flow is:
 * `MABSGameplay` depends on `MABSCore`
 * `MABSDebug` depends on `MABSCore` and consumes `MABSGameplay` runtime data
 * `MABSEditor` may depend on runtime modules
-
-Runtime presentation still depends on the engine `Niagara` module for authored VFX types and local system realization.

@@ -16,5 +16,11 @@ public class MABSGameplay : ModuleRules
 				"MABSCore",
 				"Niagara"
 			});
+
+		PrivateDependencyModuleNames.AddRange(
+			new[]
+			{
+				"NetCore"
+			});
 	}
 }

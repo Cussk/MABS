@@ -2,7 +2,7 @@
 
 ## What it is
 
-This guide covers the current Phase 7.5 setup. MABS now supports:
+This guide covers the current Phase 8 setup. MABS now supports:
 
 * individual `UMABSAbilityDefinition` assets
 * grouped `UMABSAbilitySet` assets
@@ -10,6 +10,7 @@ This guide covers the current Phase 7.5 setup. MABS now supports:
 * authored startup, delivery, and recovery timing
 * optional combo, AoE, and periodic effect data
 * startup, delivery, tracer, projectile-travel, and impact presentation
+* the Phase 8 runtime debug harness
 
 ## Why it exists
 
@@ -19,7 +20,7 @@ The goal is to get from a blank actor or character to a multiplayer-safe ability
 * lets designers author one ability at a time
 * optionally groups multiple abilities into a starting bundle
 * activates by gameplay tag through the normal existing runtime path
-* exposes readable debug events for grant, activation, delivery, effect, and set-grant flow
+* exposes readable runtime inspection for grant, activation, delivery, combo, periodic, and cue flow
 
 ## How to use it
 
@@ -56,11 +57,19 @@ Grant either:
 * one set with `GrantAbilitySet(...)`
 * multiple sets with `GrantAbilitySets(...)`
 
-Grouped granting is a convenience workflow only. It still uses the normal per-ability grant rules.
+Grouped granting is still a convenience workflow only. It reuses the normal per-ability grant rules.
 
 ### Step 5: Activate by tag
 
 Call `TryActivateAbilityByTag(...)` with the tag of a granted ability.
+
+### Step 6: Optionally enable the runtime harness
+
+If you want in-game inspection:
+
+* set the HUD class to `AMABSDebugHUD`
+* leave debug replication enabled on authority
+* run `mabs.DebugHarness 1`
 
 ## Example setups
 
@@ -73,16 +82,18 @@ Example starting player bundle:
 * fill `AbilityDefinitions` with the three ability assets
 * call `GrantAbilitySet(DA_StartingAbilities_Player)` on the server at spawn
 
-Example single authored projectile:
+Example single authored projectile with harness inspection:
 
 * `DeliveryMode = Projectile`
 * `ProjectileActorClass = BP_MABS_Fireball`
 * `DeliveryPresentation.Cue.VFX = P_FireballCast`
 * `DeliveryPresentation.ProjectileTravel.TravelVFX = P_FireballTrail`
 * `ImpactPresentation.Cue.VFX = P_FireballImpact`
+* set the HUD class to `AMABSDebugHUD`
+* use the harness to inspect the targeting / delivery section and recent event history
 
 ## Multiplayer note
 
 Ability sets do not add a separate replication model.
 
-The server still grants the underlying abilities one by one through the existing authority path, and granted runtime state still lives on `UMABSAbilityComponent`.
+The server still grants the underlying abilities one by one through the existing authority path, granted runtime state still lives on `UMABSAbilityComponent`, and the Phase 8 harness reads that authoritative state back on the owning client.

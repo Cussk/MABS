@@ -4,7 +4,7 @@
 
 MABS is a plugin-first, multiplayer-ready, data-driven ability framework for Unreal Engine.
 
-As of Phase 7.5, the runtime path supports:
+As of Phase 8, the runtime path supports:
 
 * granting authored abilities
 * grouped granting through authored ability sets
@@ -20,7 +20,8 @@ As of Phase 7.5, the runtime path supports:
 * optional montage requests
 * startup, delivery, tracer, projectile-travel, and impact presentation
 * lightweight runtime cue routing with small visibility policies
-* structured debug events and the runtime overlay
+* structured debug events
+* the Phase 8 runtime debug harness
 
 ## Why it exists
 
@@ -32,15 +33,15 @@ Most teams need the same baseline gameplay pieces:
 * reusable delivery modes for common combat actions
 * common combat breadth such as combos, bursts, burns, and regen
 * grouped starting or themed ability authoring
-* enough runtime visibility to explain success and failure
+* enough runtime visibility to explain success and failure during gameplay testing
 
 MABS provides that foundation without pulling in a larger framework.
 
 ## Current module ownership
 
-* `MABSCore` owns authored data, ability-set data, ability runtime structs, and shared combo / AoE / periodic types
-* `MABSGameplay` owns granting, grouped granting, activation, delivery, effects, combo runtime, AoE resolution, periodic timers, cue routing, replication, and projectile runtime
-* `MABSDebug` owns runtime-safe formatting helpers and the HUD overlay
+* `MABSCore` owns authored data, ability-set data, ability runtime structs, and shared debug summary types
+* `MABSGameplay` owns granting, activation, delivery, effects, combo runtime, AoE resolution, periodic timers, cue routing, replication, projectile runtime, and debug summary accessors
+* `MABSDebug` owns runtime-safe formatting helpers and the runtime harness HUD
 * `MABSEditor` remains the editor-only extension point
 
 ## Current ability flow
@@ -54,7 +55,7 @@ MABS provides that foundation without pulling in a larger framework.
 7. If AoE is enabled, authority gathers and validates the final affected actor set from the authored shape.
 8. Authority applies instant effects and optionally starts or refreshes periodic effects on the affected targets.
 9. Authority spends cost, starts cooldown, enters `Recovery`, and may auto-trigger a queued combo follow-up when recovery completes.
-10. Authority emits debug events for grant, grouped grant, combo, delivery, AoE, effect, periodic, cost, cooldown, cue, and commit steps.
+10. Authority emits categorized debug events and maintains summary state for the runtime harness.
 
 ## How to use it
 
@@ -67,3 +68,4 @@ MABS provides that foundation without pulling in a larger framework.
 7. Add `UMABSAbilityComponent` to the owning actor.
 8. Grant the ability or set on authority.
 9. Call `TryActivateAbilityByTag`.
+10. Optionally set the HUD class to `AMABSDebugHUD` and enable `mabs.DebugHarness 1` for runtime inspection.

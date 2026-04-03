@@ -2,15 +2,18 @@
 
 ## What it is
 
-This document explains how Phase 7.5 handles multiplayer authority for grouped granting, activation, delivery, combo acceptance, AoE target resolution, periodic effects, costs, cooldowns, projectile runtime, cue routing, and cosmetic realization.
+This document explains how Phase 8 handles multiplayer authority for gameplay and for the new runtime debug harness.
 
 ## Why it exists
 
-Phase 7.5 adds ability-set authoring and grouped granting, but the same rule still holds: gameplay results must stay authoritative on the server, while clients get enough replicated state and debug visibility to understand what happened.
+Phase 8 adds a stronger runtime inspection layer, but it does not change the core rule:
+
+* gameplay stays authoritative on the server
+* the owning client gets enough replicated state and routed debug visibility to understand authoritative results
 
 ## Server authority
 
-The server owns:
+The server still owns:
 
 * single ability granting
 * ability-set granting
@@ -34,7 +37,7 @@ Clients may request:
 * ability activation
 * combo follow-up input
 
-Clients do not authoritatively decide:
+Clients still do not authoritatively decide:
 
 * whether a grouped grant is valid
 * whether a combo request was valid
@@ -42,9 +45,23 @@ Clients do not authoritatively decide:
 * when periodic ticks happen
 * when periodic effects expire
 
+## Harness visibility in multiplayer
+
+Phase 8 focuses on local-owner inspection first.
+
+That means the owning client can inspect:
+
+* granted abilities through replicated `GrantedAbilities`
+* cooldown groups through replicated `CooldownGroupStates`
+* recent authoritative debug events routed from the server
+* latest target trace or delivery snapshot routed from the server
+* owner-only periodic effect summaries when debug replication is enabled
+
+The harness does not try to become a full remote debugger for every actor in the match.
+
 ## Ability sets in multiplayer
 
-Ability sets do not create a separate replication or authority model.
+Ability sets still do not create a separate replication or authority model.
 
 Grouped granting still means:
 
@@ -56,13 +73,13 @@ Grouped granting still means:
 
 Authority still decides when startup, delivery, tracer, projectile travel, and impact happen.
 
-The visibility policy model from Phase 6.5 still applies:
+The visibility policy model still applies:
 
 * `RelevantClients`
 * `OwnerOnly`
 * `LocalOnly`
 
-Ability sets do not change that cosmetic routing model.
+The Phase 8 harness only observes those decisions. It does not change them.
 
 ## Dedicated server behavior
 
@@ -73,22 +90,29 @@ Dedicated servers:
 * still route cosmetic results outward when needed
 * do not realize local VFX, SFX, or camera shake
 * still run combo timers and periodic timers authoritatively
+* can still feed the owning client enough harness data to inspect their own MABS state
+
+## What disabling debug changes
+
+If the harness is hidden or debug replication is disabled:
+
+* gameplay still works normally
+* activation, delivery, combo, AoE, periodic, and cue logic still run
+* only the extra owner-facing debug visibility is reduced
 
 ## Verification checklist
 
 Singleplayer:
 
-* starting ability sets grant all valid entries
-* null entries are skipped safely
-* duplicate entries follow the normal grant policy
+* the harness reads local state correctly
 
 Listen server:
 
-* host grouped grant behavior works correctly
-* remote client-owned actors receive granted abilities through authority
+* the host can inspect local harness data
+* the remote owning client receives authoritative harness data for their own component
 
 Dedicated server:
 
-* grouped granting remains authoritative
-* normal granted ability replication still works
-* server builds do not depend on cosmetic realization
+* the owning client sees recent debug events and target trace results
+* the owning client can inspect active periodic summaries when debug replication is enabled
+* gameplay still works correctly if the harness is disabled

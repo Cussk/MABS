@@ -297,6 +297,111 @@ namespace
 		}
 	}
 
+	EMABSDebugEventCategory GetDebugEventCategory(const FName EventName)
+	{
+		if (EventName == MABSAbilityComponentEventNames::AbilityGranted
+			|| EventName == MABSAbilityComponentEventNames::AbilityGrantRejected
+			|| EventName == MABSAbilityComponentEventNames::AbilitySetGranted
+			|| EventName == MABSAbilityComponentEventNames::AbilitySetGrantFailed
+			|| EventName == MABSAbilityComponentEventNames::AbilitySetGrantSkipped)
+		{
+			return EMABSDebugEventCategory::General;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::RequestStarted
+			|| EventName == MABSAbilityComponentEventNames::RequestAccepted
+			|| EventName == MABSAbilityComponentEventNames::RequestRejected
+			|| EventName == MABSAbilityComponentEventNames::RequestSentToServer
+			|| EventName == MABSAbilityComponentEventNames::StartupStarted
+			|| EventName == MABSAbilityComponentEventNames::AbilityBlocked
+			|| EventName == MABSAbilityComponentEventNames::AbilityUnblocked)
+		{
+			return EMABSDebugEventCategory::Activation;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::TargetTraceStarted
+			|| EventName == MABSAbilityComponentEventNames::TargetTraceHit
+			|| EventName == MABSAbilityComponentEventNames::TargetTraceRejected
+			|| EventName == MABSAbilityComponentEventNames::TargetResolved
+			|| EventName == MABSAbilityComponentEventNames::TargetResolutionFailed
+			|| EventName == MABSAbilityComponentEventNames::SocketResolved
+			|| EventName == MABSAbilityComponentEventNames::SocketFallbackUsed)
+		{
+			return EMABSDebugEventCategory::Targeting;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::DeliveryScheduled
+			|| EventName == MABSAbilityComponentEventNames::DeliveryTriggered
+			|| EventName == MABSAbilityComponentEventNames::DeliveryStarted
+			|| EventName == MABSAbilityComponentEventNames::DeliveryFailed
+			|| EventName == MABSAbilityComponentEventNames::HitTraceHit
+			|| EventName == MABSAbilityComponentEventNames::HitTraceRejected
+			|| EventName == MABSAbilityComponentEventNames::MeleeHit
+			|| EventName == MABSAbilityComponentEventNames::MeleeRejected
+			|| EventName == MABSAbilityComponentEventNames::ProjectileSpawned
+			|| EventName == MABSAbilityComponentEventNames::ProjectileSpawnFailed
+			|| EventName == MABSAbilityComponentEventNames::ProjectileImpact
+			|| EventName == MABSAbilityComponentEventNames::ProjectileImpactRejected
+			|| EventName == MABSAbilityComponentEventNames::AoEResolved
+			|| EventName == MABSAbilityComponentEventNames::AoETargetRejected
+			|| EventName == MABSAbilityComponentEventNames::EffectApplied
+			|| EventName == MABSAbilityComponentEventNames::EffectApplicationFailed
+			|| EventName == MABSAbilityComponentEventNames::CommitSucceeded
+			|| EventName == MABSAbilityComponentEventNames::RecoveryStarted
+			|| EventName == MABSAbilityComponentEventNames::RecoveryCompleted)
+		{
+			return EMABSDebugEventCategory::Delivery;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::CooldownRejected
+			|| EventName == MABSAbilityComponentEventNames::CooldownStarted
+			|| EventName == MABSAbilityComponentEventNames::CostRejected
+			|| EventName == MABSAbilityComponentEventNames::CostSpent
+			|| EventName == MABSAbilityComponentEventNames::CostValidated)
+		{
+			return EMABSDebugEventCategory::CostCooldown;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::ComboQueued
+			|| EventName == MABSAbilityComponentEventNames::ComboRejected
+			|| EventName == MABSAbilityComponentEventNames::ComboWindowStarted
+			|| EventName == MABSAbilityComponentEventNames::ComboWindowEnded)
+		{
+			return EMABSDebugEventCategory::Combo;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::PeriodicEffectApplied
+			|| EventName == MABSAbilityComponentEventNames::PeriodicEffectRefreshed
+			|| EventName == MABSAbilityComponentEventNames::PeriodicEffectTick
+			|| EventName == MABSAbilityComponentEventNames::PeriodicEffectExpired)
+		{
+			return EMABSDebugEventCategory::Periodic;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::MontagePlayRequested
+			|| EventName == MABSAbilityComponentEventNames::MontagePlayFailed
+			|| EventName == MABSAbilityComponentEventNames::PresentationAssetMissing
+			|| EventName == MABSAbilityComponentEventNames::PresentationCuePolicyFallbackUsed
+			|| EventName == MABSAbilityComponentEventNames::PresentationCueRealized
+			|| EventName == MABSAbilityComponentEventNames::PresentationCueRouted
+			|| EventName == MABSAbilityComponentEventNames::PresentationCueSkipped
+			|| EventName == MABSAbilityComponentEventNames::PresentationSocketFallbackUsed
+			|| EventName == MABSAbilityComponentEventNames::ProjectileTravelPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::StartupPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::DeliveryPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::ImpactPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::TracerCueRealized
+			|| EventName == MABSAbilityComponentEventNames::TracerCueRouted
+			|| EventName == MABSAbilityComponentEventNames::TracerCueSkipped
+			|| EventName == MABSAbilityComponentEventNames::TracerSpawned
+			|| EventName == MABSAbilityComponentEventNames::TracerSpawnFailed)
+		{
+			return EMABSDebugEventCategory::Presentation;
+		}
+
+		return EMABSDebugEventCategory::General;
+	}
+
 	FString GetAbilityLabel(const UMABSAbilityDefinition* AbilityDefinition)
 	{
 		if (AbilityDefinition == nullptr)
@@ -307,6 +412,18 @@ namespace
 		return AbilityDefinition->DisplayName.IsEmpty()
 			? GetNameSafe(AbilityDefinition)
 			: AbilityDefinition->DisplayName.ToString();
+	}
+
+	FText GetAbilityDebugDisplayName(const UMABSAbilityDefinition* AbilityDefinition)
+	{
+		if (AbilityDefinition == nullptr)
+		{
+			return FText::FromString(TEXT("InvalidAbility"));
+		}
+
+		return AbilityDefinition->DisplayName.IsEmpty()
+			? FText::FromString(GetNameSafe(AbilityDefinition))
+			: AbilityDefinition->DisplayName;
 	}
 
 	FString GetAbilitySetLabel(const UMABSAbilitySet* AbilitySet)
@@ -464,7 +581,15 @@ void UMABSAbilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
 	DOREPLIFETIME(UMABSAbilityComponent, GrantedAbilities);
 	DOREPLIFETIME(UMABSAbilityComponent, CooldownGroupStates);
+	DOREPLIFETIME_CONDITION(UMABSAbilityComponent, ActivePeriodicEffects, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(UMABSAbilityComponent, bReplicateDebugDataToOwningClient, COND_OwnerOnly);
+}
+
+void UMABSAbilityComponent::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker)
+{
+	Super::PreReplication(ChangedPropertyTracker);
+
+	DOREPLIFETIME_ACTIVE_OVERRIDE(UMABSAbilityComponent, ActivePeriodicEffects, bReplicateDebugDataToOwningClient);
 }
 
 FMABSAbilityHandle UMABSAbilityComponent::GrantAbility(UMABSAbilityDefinition* AbilityDefinition)
@@ -820,6 +945,176 @@ TArray<FMABSAbilityDebugEvent> UMABSAbilityComponent::GetRecentDebugEvents() con
 	return RecentDebugEvents;
 }
 
+TArray<FMABSGrantedAbilityDebugSummary> UMABSAbilityComponent::GetGrantedAbilityDebugSummaries() const
+{
+	TArray<FMABSGrantedAbilityDebugSummary> Summaries;
+	Summaries.Reserve(GrantedAbilities.Num());
+
+	const float CurrentWorldTime = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0f;
+	for (const FMABSAbilitySpec& AbilitySpec : GrantedAbilities)
+	{
+		FMABSGrantedAbilityDebugSummary Summary;
+		Summary.AbilityHandle = AbilitySpec.Handle;
+		Summary.AbilityTag = AbilitySpec.AbilityTag;
+		Summary.DisplayName = GetAbilityDebugDisplayName(AbilitySpec.AbilityDefinition);
+		Summary.RuntimeState = AbilitySpec.RuntimeState;
+		Summary.LastActivationResult = AbilitySpec.LastActivationResult;
+		Summary.bIsBlocked = AbilitySpec.RuntimeState == EMABSAbilityRuntimeState::Blocked;
+
+		if (AbilitySpec.AbilityDefinition != nullptr)
+		{
+			Summary.DeliveryMode = AbilitySpec.AbilityDefinition->DeliveryMode;
+			Summary.InstantEffectType = AbilitySpec.AbilityDefinition->InstantEffectType;
+			Summary.CooldownGroupTag = AbilitySpec.AbilityDefinition->CooldownGroupTag;
+			Summary.ResourceCost = AbilitySpec.AbilityDefinition->ResourceCost;
+			Summary.bCanBufferComboInput = AbilitySpec.AbilityDefinition->Combo.bBufferComboInput;
+			Summary.NextComboAbilityTag = AbilitySpec.AbilityDefinition->Combo.NextComboAbilityTag;
+		}
+
+		Summary.CooldownRemainingSeconds = FMath::Max(0.0f, AbilitySpec.CooldownEndTime - CurrentWorldTime);
+		if (Summary.CooldownGroupTag.IsValid())
+		{
+			Summary.CooldownGroupRemainingSeconds = GetCooldownGroupRemainingInternal(Summary.CooldownGroupTag);
+		}
+
+		if (AbilitySpec.ActivationStartTime > 0.0f)
+		{
+			Summary.ActivationAgeSeconds = FMath::Max(0.0f, CurrentWorldTime - AbilitySpec.ActivationStartTime);
+		}
+
+		if (AbilitySpec.ScheduledDeliveryTime > 0.0f)
+		{
+			Summary.DeliveryRemainingSeconds = FMath::Max(0.0f, AbilitySpec.ScheduledDeliveryTime - CurrentWorldTime);
+		}
+
+		if (AbilitySpec.RecoveryEndTime > 0.0f)
+		{
+			Summary.RecoveryRemainingSeconds = FMath::Max(0.0f, AbilitySpec.RecoveryEndTime - CurrentWorldTime);
+		}
+
+		if (AbilitySpec.ComboWindowEndTime > AbilitySpec.ComboWindowStartTime)
+		{
+			if (CurrentWorldTime < AbilitySpec.ComboWindowStartTime)
+			{
+				Summary.ComboWindowOpensInSeconds = FMath::Max(0.0f, AbilitySpec.ComboWindowStartTime - CurrentWorldTime);
+			}
+			else if (CurrentWorldTime < AbilitySpec.ComboWindowEndTime)
+			{
+				Summary.bComboWindowOpen = true;
+				Summary.ComboWindowRemainingSeconds = FMath::Max(0.0f, AbilitySpec.ComboWindowEndTime - CurrentWorldTime);
+			}
+		}
+
+		Summary.QueuedComboAbilityTag = AbilitySpec.QueuedComboAbilityTag;
+		Summaries.Add(MoveTemp(Summary));
+	}
+
+	return Summaries;
+}
+
+TArray<FMABSCooldownGroupDebugSummary> UMABSAbilityComponent::GetCooldownGroupDebugSummaries() const
+{
+	TArray<FMABSCooldownGroupDebugSummary> Summaries;
+
+	const float CurrentWorldTime = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0f;
+	for (const FMABSCooldownGroupState& CooldownGroupState : CooldownGroupStates)
+	{
+		const float RemainingSeconds = FMath::Max(0.0f, CooldownGroupState.CooldownEndTime - CurrentWorldTime);
+		if (RemainingSeconds <= 0.0f)
+		{
+			continue;
+		}
+
+		FMABSCooldownGroupDebugSummary Summary;
+		Summary.CooldownGroupTag = CooldownGroupState.CooldownGroupTag;
+		Summary.RemainingSeconds = RemainingSeconds;
+		Summaries.Add(Summary);
+	}
+
+	Summaries.Sort([](const FMABSCooldownGroupDebugSummary& Left, const FMABSCooldownGroupDebugSummary& Right)
+	{
+		return Left.RemainingSeconds > Right.RemainingSeconds;
+	});
+
+	return Summaries;
+}
+
+FMABSComboDebugSummary UMABSAbilityComponent::GetComboDebugSummary() const
+{
+	FMABSComboDebugSummary Summary;
+
+	const float CurrentWorldTime = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0f;
+	const FMABSAbilitySpec* BestSpec = nullptr;
+	int32 BestPriority = INDEX_NONE;
+
+	for (const FMABSAbilitySpec& AbilitySpec : GrantedAbilities)
+	{
+		const bool bHasComboData = AbilitySpec.AbilityDefinition != nullptr && AbilitySpec.AbilityDefinition->Combo.IsEnabled();
+		const bool bHasQueuedFollowup = AbilitySpec.QueuedComboAbilityTag.IsValid();
+		const bool bHasWindow = AbilitySpec.ComboWindowEndTime > AbilitySpec.ComboWindowStartTime;
+		const bool bWindowOpen = bHasWindow
+			&& CurrentWorldTime >= AbilitySpec.ComboWindowStartTime
+			&& CurrentWorldTime < AbilitySpec.ComboWindowEndTime;
+		const bool bWindowPending = bHasWindow && CurrentWorldTime < AbilitySpec.ComboWindowStartTime;
+
+		if (!bHasComboData && !bHasQueuedFollowup && !bHasWindow)
+		{
+			continue;
+		}
+
+		int32 Priority = 1;
+		if (bWindowPending)
+		{
+			Priority = 2;
+		}
+		if (bHasQueuedFollowup)
+		{
+			Priority = 3;
+		}
+		if (bWindowOpen)
+		{
+			Priority = 4;
+		}
+
+		if (Priority > BestPriority)
+		{
+			BestPriority = Priority;
+			BestSpec = &AbilitySpec;
+		}
+	}
+
+	if (BestSpec == nullptr)
+	{
+		return Summary;
+	}
+
+	Summary.bHasActiveComboState = true;
+	Summary.SourceAbilityTag = BestSpec->AbilityTag;
+	Summary.SourceAbilityDisplayName = GetAbilityDebugDisplayName(BestSpec->AbilityDefinition);
+	Summary.QueuedComboAbilityTag = BestSpec->QueuedComboAbilityTag;
+
+	if (BestSpec->AbilityDefinition != nullptr)
+	{
+		Summary.NextComboAbilityTag = BestSpec->AbilityDefinition->Combo.NextComboAbilityTag;
+		Summary.bBufferComboInput = BestSpec->AbilityDefinition->Combo.bBufferComboInput;
+	}
+
+	if (BestSpec->ComboWindowEndTime > BestSpec->ComboWindowStartTime)
+	{
+		if (CurrentWorldTime < BestSpec->ComboWindowStartTime)
+		{
+			Summary.ComboWindowOpensInSeconds = FMath::Max(0.0f, BestSpec->ComboWindowStartTime - CurrentWorldTime);
+		}
+		else if (CurrentWorldTime < BestSpec->ComboWindowEndTime)
+		{
+			Summary.bComboWindowOpen = true;
+			Summary.ComboWindowRemainingSeconds = FMath::Max(0.0f, BestSpec->ComboWindowEndTime - CurrentWorldTime);
+		}
+	}
+
+	return Summary;
+}
+
 FMABSTargetTraceDebugInfo UMABSAbilityComponent::GetLatestTargetTraceDebugInfo() const
 {
 	return LatestTargetTraceDebugInfo;
@@ -828,6 +1123,62 @@ FMABSTargetTraceDebugInfo UMABSAbilityComponent::GetLatestTargetTraceDebugInfo()
 TArray<FMABSActivePeriodicEffect> UMABSAbilityComponent::GetActivePeriodicEffects() const
 {
 	return ActivePeriodicEffects;
+}
+
+TArray<FMABSPeriodicEffectDebugSummary> UMABSAbilityComponent::GetPeriodicEffectDebugSummaries() const
+{
+	TArray<FMABSPeriodicEffectDebugSummary> Summaries;
+	Summaries.Reserve(ActivePeriodicEffects.Num());
+
+	const UWorld* const World = GetWorld();
+	const float CurrentWorldTime = World != nullptr ? World->GetTimeSeconds() : 0.0f;
+	for (const FMABSActivePeriodicEffect& ActiveEffect : ActivePeriodicEffects)
+	{
+		FMABSPeriodicEffectDebugSummary Summary;
+		Summary.RuntimeId = ActiveEffect.RuntimeId;
+		Summary.AbilityTag = ActiveEffect.AbilityTag;
+		Summary.AbilityDisplayName = GetAbilityDebugDisplayName(ActiveEffect.AbilityDefinition);
+		Summary.EffectType = ActiveEffect.EffectType;
+		Summary.SourceActorName = GetNameSafe(ActiveEffect.SourceActor);
+		Summary.TargetActorName = GetNameSafe(ActiveEffect.TargetActor);
+		Summary.TickMagnitude = ActiveEffect.TickMagnitude;
+		Summary.TickInterval = ActiveEffect.TickInterval;
+		Summary.TimeRemainingSeconds = FMath::Max(0.0f, ActiveEffect.ExpirationWorldTime - CurrentWorldTime);
+
+		bool bUsedAuthoritativeTimer = false;
+		if (World != nullptr)
+		{
+			if (const FMABSPeriodicEffectRuntime* const Runtime = ActivePeriodicEffectRuntimes.Find(ActiveEffect.RuntimeId))
+			{
+				const float TickTimerRemaining = World->GetTimerManager().GetTimerRemaining(Runtime->TickTimerHandle);
+				if (TickTimerRemaining >= 0.0f)
+				{
+					Summary.TimeUntilNextTickSeconds = FMath::Min(TickTimerRemaining, Summary.TimeRemainingSeconds);
+					bUsedAuthoritativeTimer = true;
+				}
+			}
+		}
+
+		if (!bUsedAuthoritativeTimer && ActiveEffect.TickInterval > 0.0f)
+		{
+			const float ElapsedSinceApplication = FMath::Max(0.0f, CurrentWorldTime - ActiveEffect.AppliedWorldTime);
+			const int32 CompletedTickCount = FMath::FloorToInt(ElapsedSinceApplication / ActiveEffect.TickInterval);
+			const float NextTickWorldTime = ActiveEffect.AppliedWorldTime + ((CompletedTickCount + 1) * ActiveEffect.TickInterval);
+			Summary.TimeUntilNextTickSeconds = FMath::Clamp(
+				NextTickWorldTime - CurrentWorldTime,
+				0.0f,
+				Summary.TimeRemainingSeconds);
+		}
+
+		Summaries.Add(MoveTemp(Summary));
+	}
+
+	Summaries.Sort([](const FMABSPeriodicEffectDebugSummary& Left, const FMABSPeriodicEffectDebugSummary& Right)
+	{
+		return Left.RuntimeId < Right.RuntimeId;
+	});
+
+	return Summaries;
 }
 
 void UMABSAbilityComponent::SetDebugReplicationEnabled(const bool bEnabled)
@@ -3784,6 +4135,7 @@ FMABSAbilityDebugEvent UMABSAbilityComponent::MakeDebugEvent(
 {
 	FMABSAbilityDebugEvent DebugEvent;
 	DebugEvent.EventName = EventName;
+	DebugEvent.Category = GetDebugEventCategory(EventName);
 	DebugEvent.AbilityTag = AbilityTag;
 	DebugEvent.AbilityHandle = AbilityHandle;
 	DebugEvent.RuntimeState = RuntimeState;
@@ -3805,6 +4157,10 @@ void UMABSAbilityComponent::RecordDebugEvent(const FMABSAbilityDebugEvent& Debug
 
 	const UEnum* RuntimeStateEnum = StaticEnum<EMABSAbilityRuntimeState>();
 	const UEnum* ResultEnum = StaticEnum<EMABSAbilityActivationResult>();
+	const UEnum* CategoryEnum = StaticEnum<EMABSDebugEventCategory>();
+	const FString CategoryName = CategoryEnum != nullptr
+		? CategoryEnum->GetNameStringByValue(static_cast<int64>(DebugEvent.Category))
+		: TEXT("General");
 	const FString RuntimeStateName = RuntimeStateEnum != nullptr
 		? RuntimeStateEnum->GetNameStringByValue(static_cast<int64>(DebugEvent.RuntimeState))
 		: TEXT("Unknown");
@@ -3815,7 +4171,8 @@ void UMABSAbilityComponent::RecordDebugEvent(const FMABSAbilityDebugEvent& Debug
 	UE_LOG(
 		LogMABSAbilitySystem,
 		Log,
-		TEXT("[%s] Owner=%s AbilityTag=%s Handle=%d State=%s Result=%s Message=%s"),
+		TEXT("[%s/%s] Owner=%s AbilityTag=%s Handle=%d State=%s Result=%s Message=%s"),
+		*CategoryName,
 		*DebugEvent.EventName.ToString(),
 		*DebugEvent.OwnerName,
 		*DebugEvent.AbilityTag.ToString(),

@@ -2,96 +2,111 @@
 
 ## What it is
 
-This document explains the current Phase 7.5 debugging tools for MABS.
+This document explains the Phase 8 runtime debugging model for MABS.
+
+Phase 8 turns the old lightweight overlay into a real runtime harness that is useful during standalone, listen-server, and dedicated-server client testing.
 
 ## Why it exists
 
-Phase 7.5 adds grouped granting through ability sets. That workflow is only practical if the runtime can explain which set was processed, how many entries were granted, and which entries were skipped or rejected.
+By Phase 8, MABS already has enough runtime breadth that raw logs alone are not enough.
+
+Users need to inspect:
+
+* granted abilities and their current state
+* latest activation success or failure
+* targeting and delivery results
+* current cooldown groups and recent cost failures
+* combo state
+* active periodic effects
+* recent presentation and cue routing activity
 
 ## What is available
 
-Phase 7.5 debugging includes:
+Phase 8 debugging now includes:
 
-* structured `FMABSAbilityDebugEvent` output
-* the latest `FMABSTargetTraceDebugInfo` snapshot for target traces, hit traces, and melee sweeps
-* granted ability summaries with timing, combo queue, and cooldown state
-* the current authority-side active periodic effect list through `GetActivePeriodicEffects()`
-* an owning-client debug replication toggle on `UMABSAbilityComponent`
-* optional trace and sweep debug drawing
-* `UMABSDebugBlueprintLibrary`
-* `AMABSDebugHUD`
+* structured `FMABSAbilityDebugEvent` output with `Category`
+* the latest `FMABSTargetTraceDebugInfo` snapshot
+* `FMABSGrantedAbilityDebugSummary`
+* `FMABSCooldownGroupDebugSummary`
+* `FMABSComboDebugSummary`
+* `FMABSPeriodicEffectDebugSummary`
+* `GetGrantedAbilityDebugSummaries()`
+* `GetCooldownGroupDebugSummaries()`
+* `GetComboDebugSummary()`
+* `GetPeriodicEffectDebugSummaries()`
+* owner-routed recent event history
+* owner-routed target trace snapshots
+* owner-only periodic summary replication when debug replication is enabled
+* category-aware formatting helpers in `UMABSDebugBlueprintLibrary`
+* the full `AMABSDebugHUD` runtime harness
 
-## Important event names
+## Event categories
 
-Granting and grouped granting:
+Phase 8 keeps the existing event system, but each event now carries a lightweight category:
 
-* `AbilityGranted`
-* `AbilityGrantRejected`
-* `AbilitySetGranted`
-* `AbilitySetGrantSkipped`
-* `AbilitySetGrantFailed`
+* `General`
+* `Activation`
+* `Targeting`
+* `Delivery`
+* `CostCooldown`
+* `Combo`
+* `Periodic`
+* `Presentation`
 
-Timing and combo events:
+This makes it practical to filter the runtime harness without inventing a second telemetry system.
 
-* `StartupStarted`
-* `DeliveryScheduled`
-* `DeliveryTriggered`
-* `RecoveryStarted`
-* `RecoveryCompleted`
-* `ComboWindowStarted`
-* `ComboWindowEnded`
-* `ComboQueued`
-* `ComboRejected`
+## How to enable it
 
-AoE and gameplay result events:
+1. Set your HUD class to `AMABSDebugHUD` or a subclass of it.
+2. Leave debug replication enabled on `UMABSAbilityComponent`, or call `SetDebugReplicationEnabled(true)` on authority.
+3. Use the master toggle:
+   * `mabs.DebugHarness 1`
+   * `mabs.DebugHarness 0`
+4. Narrow the panel with category toggles:
+   * `mabs.DebugHarness.General`
+   * `mabs.DebugHarness.Activation`
+   * `mabs.DebugHarness.Targeting`
+   * `mabs.DebugHarness.Delivery`
+   * `mabs.DebugHarness.CostCooldown`
+   * `mabs.DebugHarness.Combo`
+   * `mabs.DebugHarness.Periodic`
+   * `mabs.DebugHarness.Presentation`
 
-* `AoEResolved`
-* `AoETargetRejected`
-* `EffectApplied`
-* `EffectApplicationFailed`
+## What the harness shows
 
-Periodic events:
+When enabled, `AMABSDebugHUD` shows:
 
-* `PeriodicEffectApplied`
-* `PeriodicEffectRefreshed`
-* `PeriodicEffectTick`
-* `PeriodicEffectExpired`
+* status and replication context
+* granted ability summaries
+* latest activation result and latest enabled failure
+* latest targeting and delivery context
+* current cooldown groups
+* current combo state
+* active periodic effect summaries
+* recent presentation and cue activity
+* recent event history filtered by the enabled categories
 
-Presentation and socket events from earlier phases still remain:
+## Multiplayer note
 
-* `PresentationCueRouted`
-* `PresentationCueSkipped`
-* `PresentationCueRealized`
-* `TracerCueRouted`
-* `TracerCueRealized`
-* `ProjectileTravelPresentationTriggered`
-* `SocketResolved`
-* `SocketFallbackUsed`
-* `PresentationSocketFallbackUsed`
+The harness is local-owner inspection first.
 
-## How to use it
+That means:
 
-Read:
-
-* `OnAbilityDebugEvent`
-* `GetRecentDebugEvents()`
-* `GetLatestTargetTraceDebugInfo()`
-* `GetActivePeriodicEffects()`
-* `LogMABSAbilitySystem`
-
-For Phase 7.5 grouped grant problems, look for this order:
-
-1. `AbilitySetGranted`, `AbilitySetGrantSkipped`, or `AbilitySetGrantFailed`
-2. any underlying `AbilityGranted` or `AbilityGrantRejected` entries
-3. activation, delivery, AoE, and periodic events after the grant succeeds
+* authority still decides gameplay truth
+* the owning client receives recent debug events and target trace snapshots when debug replication is enabled
+* active periodic effect summaries are replicated owner-only for harness inspection
+* disabling the harness does not change gameplay behavior
 
 ## Example
 
-Example starting bundle flow:
+Example dedicated-server client workflow:
 
-* `AbilityGranted`
-* `AbilityGranted`
-* `AbilitySetGrantSkipped`
-* `AbilitySetGranted`
-
-That means two valid abilities were granted, one null entry was skipped, and the set finished successfully overall.
+1. grant a starter ability set on the server
+2. set the HUD class to `AMABSDebugHUD`
+3. enable `mabs.DebugHarness 1`
+4. fire a projectile ability, then apply a DOT
+5. read:
+   * the granted ability entry
+   * the latest targeting / delivery line
+   * the recent failure line if activation was denied
+   * the periodic effect entry with next-tick and remaining-time data

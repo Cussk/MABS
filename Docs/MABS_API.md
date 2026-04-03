@@ -2,13 +2,15 @@
 
 ## What it is
 
-This document lists the current Phase 7.5 public surface for MABS and shows which module owns authored ability-set data, granted runtime state, and grouped grant helpers.
+This document lists the current Phase 8 public surface for MABS.
+
+Phase 8 adds the read-model and query API used by the runtime debug harness while keeping gameplay execution in the existing component path.
 
 ## Module ownership
 
 ### `MABSCore`
 
-Owns shared authored data and runtime types:
+Owns shared authored data, runtime types, and shared debug read models:
 
 * `EMABSAbilityActivationResult`
 * `EMABSAbilityRuntimeState`
@@ -19,6 +21,7 @@ Owns shared authored data and runtime types:
 * `EMABSInstantEffectType`
 * `EMABSAoEShape`
 * `EMABSPeriodicEffectType`
+* `EMABSDebugEventCategory`
 * `FMABSAbilityHandle`
 * `FMABSAbilitySpec`
 * `FMABSCooldownGroupState`
@@ -28,6 +31,10 @@ Owns shared authored data and runtime types:
 * `FMABSActivePeriodicEffect`
 * `FMABSAbilityDebugEvent`
 * `FMABSTargetTraceDebugInfo`
+* `FMABSGrantedAbilityDebugSummary`
+* `FMABSCooldownGroupDebugSummary`
+* `FMABSComboDebugSummary`
+* `FMABSPeriodicEffectDebugSummary`
 * `FMABSPresentationCueEvent`
 * `FMABSTracerCueEvent`
 * `FMABSProjectileTravelCueEvent`
@@ -36,7 +43,7 @@ Owns shared authored data and runtime types:
 
 ### `MABSGameplay`
 
-Owns gameplay and grant execution:
+Owns gameplay execution and debug query accessors:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
@@ -45,7 +52,7 @@ Owns gameplay and grant execution:
 
 ### `MABSDebug`
 
-Owns runtime-safe debug helpers:
+Owns harness UI and formatting:
 
 * `UMABSDebugBlueprintLibrary`
 * `AMABSDebugHUD`
@@ -71,9 +78,9 @@ Owns grouped grant authoring through:
 
 * `AbilityDefinitions`
 
-`UMABSAbilitySet` does not store runtime grant state. It is only a grouped authoring asset.
+`UMABSAbilitySet` does not store runtime grant state. It is still only a grouped authoring asset.
 
-## Important runtime types
+## Important runtime and debug read-model types
 
 ### `FMABSAbilitySpec`
 
@@ -88,21 +95,52 @@ Granted runtime state still lives here:
 * combo window timestamps
 * queued combo follow-up tag
 
-### `FMABSActivePeriodicEffect`
+### `FMABSAbilityDebugEvent`
 
-Authority-side periodic runtime fields:
+The structured event model now also includes:
 
-* `RuntimeId`
-* `AbilityTag`
-* `AbilityHandle`
-* `AbilityDefinition`
-* `SourceActor`
-* `TargetActor`
-* `EffectType`
-* `TickMagnitude`
-* `TickInterval`
-* `AppliedWorldTime`
-* `ExpirationWorldTime`
+* `Category`
+
+That category is intended for harness filtering, not for gameplay logic.
+
+### `FMABSGrantedAbilityDebugSummary`
+
+Compact harness-facing ability state:
+
+* tag and display name
+* runtime state and last activation result
+* cooldown and cooldown-group remaining time
+* delivery mode
+* combo-window and queued-follow-up state
+* resource cost
+
+### `FMABSCooldownGroupDebugSummary`
+
+Compact harness-facing cooldown-group state:
+
+* cooldown group tag
+* remaining time
+
+### `FMABSComboDebugSummary`
+
+Compact harness-facing combo state:
+
+* source ability
+* next combo tag
+* window open or opens-in state
+* queued follow-up
+* buffer setting
+
+### `FMABSPeriodicEffectDebugSummary`
+
+Compact harness-facing periodic effect state:
+
+* source ability
+* target name
+* type
+* tick magnitude and interval
+* time until next tick
+* time remaining
 
 ## Important `UMABSAbilityComponent` API
 
@@ -112,20 +150,40 @@ Granting:
 * `GrantAbilitySet(...)`
 * `GrantAbilitySets(...)`
 
-Activation and queries:
+Activation and gameplay-facing queries:
 
 * `TryActivateAbilityByTag(...)`
 * `GetGrantedAbilities()`
 * `GetActivePeriodicEffects()`
+
+Harness-facing queries:
+
 * `GetRecentDebugEvents()`
 * `GetLatestTargetTraceDebugInfo()`
+* `GetGrantedAbilityDebugSummaries()`
+* `GetCooldownGroupDebugSummaries()`
+* `GetComboDebugSummary()`
+* `GetPeriodicEffectDebugSummaries()`
+* `SetDebugReplicationEnabled(...)`
+* `IsDebugReplicationEnabled()`
 
-## Important debug events
+## Important `AMABSDebugHUD` API
 
-Phase 7.5 adds or highlights:
+Phase 8 adds lightweight harness controls on the HUD:
 
-* `AbilitySetGranted`
-* `AbilitySetGrantSkipped`
-* `AbilitySetGrantFailed`
+* `SetOverlayEnabled(...)`
+* `ToggleOverlayEnabled()`
+* `SetCategoryEnabled(...)`
+* `ToggleCategoryEnabled(...)`
+* `IsCategoryEnabled(...)`
 
-Earlier grant, activation, delivery, effect, combo, AoE, and periodic events still remain.
+## Important debug helpers
+
+`UMABSDebugBlueprintLibrary` now exposes harness-facing formatting helpers for:
+
+* compact event lines
+* granted ability summaries
+* cooldown group summaries
+* combo summaries
+* periodic summaries
+* category labels and colors

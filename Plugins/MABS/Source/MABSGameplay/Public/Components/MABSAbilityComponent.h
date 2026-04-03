@@ -23,6 +23,7 @@ class USkeletalMeshComponent;
 class USoundBase;
 class UMABSAbilityDefinition;
 class UMABSAbilitySet;
+class IRepChangedPropertyTracker;
 struct FHitResult;
 
 struct FMABSAbilityExecutionContext
@@ -60,6 +61,7 @@ public:
 	UMABSAbilityComponent();
 
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker) override;
 
 	UPROPERTY(BlueprintAssignable, Category="MABS|Debug")
 	FMABSAbilityDebugEventSignature OnAbilityDebugEvent;
@@ -101,10 +103,22 @@ public:
 	TArray<FMABSAbilityDebugEvent> GetRecentDebugEvents() const;
 
 	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	TArray<FMABSGrantedAbilityDebugSummary> GetGrantedAbilityDebugSummaries() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	TArray<FMABSCooldownGroupDebugSummary> GetCooldownGroupDebugSummaries() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	FMABSComboDebugSummary GetComboDebugSummary() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
 	FMABSTargetTraceDebugInfo GetLatestTargetTraceDebugInfo() const;
 
 	UFUNCTION(BlueprintPure, Category="MABS|Effects")
 	TArray<FMABSActivePeriodicEffect> GetActivePeriodicEffects() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Debug")
+	TArray<FMABSPeriodicEffectDebugSummary> GetPeriodicEffectDebugSummaries() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MABS|Debug")
 	void SetDebugReplicationEnabled(bool bEnabled);
@@ -126,7 +140,7 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Debug", Transient)
 	FMABSTargetTraceDebugInfo LatestTargetTraceDebugInfo;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Effects", Transient)
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Effects", Transient, Replicated)
 	TArray<FMABSActivePeriodicEffect> ActivePeriodicEffects;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MABS|Debug", meta=(ClampMin="1"))

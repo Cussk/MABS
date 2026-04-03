@@ -12,7 +12,8 @@ public class MABSCore : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"GameplayTags"
+				"GameplayTags",
+				"Niagara"
 			});
 	}
 }

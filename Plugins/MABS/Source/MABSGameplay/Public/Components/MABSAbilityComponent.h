@@ -16,7 +16,7 @@ class AMABSProjectileBase;
 class AActor;
 class UAnimMontage;
 class UCameraShakeBase;
-class UParticleSystem;
+class UNiagaraSystem;
 class USceneComponent;
 class USkeletalMeshComponent;
 class USoundBase;
@@ -43,7 +43,7 @@ struct FMABSPresentationCueRuntimeData
 	GENERATED_BODY()
 
 	UPROPERTY()
-	TObjectPtr<UParticleSystem> VFX = nullptr;
+	TObjectPtr<UNiagaraSystem> VFX = nullptr;
 
 	UPROPERTY()
 	TObjectPtr<USoundBase> SFX = nullptr;
@@ -73,7 +73,7 @@ struct FMABSTracerPresentationRuntimeData
 	GENERATED_BODY()
 
 	UPROPERTY()
-	TObjectPtr<UParticleSystem> VFX = nullptr;
+	TObjectPtr<UNiagaraSystem> VFX = nullptr;
 
 	UPROPERTY()
 	TObjectPtr<USoundBase> SFX = nullptr;

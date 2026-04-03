@@ -21,8 +21,8 @@
 #include "Interfaces/MABSInstantEffectReceiver.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
-#include "Particles/ParticleSystem.h"
-#include "Particles/ParticleSystemComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
@@ -301,6 +301,10 @@ namespace
 
 		return ObjectQueryParams;
 	}
+
+	const FName NiagaraTracerTraceStartParameter(TEXT("User.MABS_TraceStart"));
+	const FName NiagaraTracerTraceEndParameter(TEXT("User.MABS_TraceEnd"));
+	const FName NiagaraTracerImpactPointParameter(TEXT("User.MABS_ImpactPoint"));
 }
 
 UMABSAbilityComponent::UMABSAbilityComponent()
@@ -3390,7 +3394,7 @@ void UMABSAbilityComponent::PlayPresentationCueLocally(const FMABSPresentationCu
 
 	if (CueData.VFX != nullptr)
 	{
-		UGameplayStatics::SpawnEmitterAtLocation(World, CueData.VFX, FTransform(CueData.Rotation, CueData.Location));
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, CueData.VFX, CueData.Location, CueData.Rotation);
 	}
 
 	if (CueData.SFX != nullptr)
@@ -3426,14 +3430,19 @@ void UMABSAbilityComponent::SpawnTracerPresentationLocally(const FMABSTracerPres
 	const FRotator TracerRotation = (TracerData.TraceEnd - TracerData.TraceStart).Rotation();
 	if (TracerData.VFX != nullptr)
 	{
-		if (UParticleSystemComponent* const TracerComponent = UGameplayStatics::SpawnEmitterAtLocation(
+		if (UNiagaraComponent* const TracerComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			World,
 			TracerData.VFX,
-			FTransform(TracerRotation, TracerData.TraceStart)))
+			TracerData.TraceStart,
+			TracerRotation,
+			FVector(1.0f),
+			true,
+			false))
 		{
-			TracerComponent->SetVectorParameter(TEXT("MABS_TraceStart"), TracerData.TraceStart);
-			TracerComponent->SetVectorParameter(TEXT("MABS_TraceEnd"), TracerData.TraceEnd);
-			TracerComponent->SetVectorParameter(TEXT("MABS_ImpactPoint"), TracerData.TraceEnd);
+			TracerComponent->SetVectorParameter(NiagaraTracerTraceStartParameter, TracerData.TraceStart);
+			TracerComponent->SetVectorParameter(NiagaraTracerTraceEndParameter, TracerData.TraceEnd);
+			TracerComponent->SetVectorParameter(NiagaraTracerImpactPointParameter, TracerData.TraceEnd);
+			TracerComponent->Activate(true);
 		}
 	}
 

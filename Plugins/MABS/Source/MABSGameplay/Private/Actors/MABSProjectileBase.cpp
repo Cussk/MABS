@@ -9,6 +9,7 @@
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "NiagaraFunctionLibrary.h"
 
 AMABSProjectileBase::AMABSProjectileBase()
 {
@@ -213,9 +214,14 @@ void AMABSProjectileBase::ActivateTravelPresentation()
 
 	if (SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX != nullptr)
 	{
-		UGameplayStatics::SpawnEmitterAttached(
+		UNiagaraFunctionLibrary::SpawnSystemAttached(
 			SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX,
-			RootComponent);
+			RootComponent,
+			NAME_None,
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			EAttachLocation::KeepRelativeOffset,
+			true);
 	}
 
 	if (SourceAbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX != nullptr)

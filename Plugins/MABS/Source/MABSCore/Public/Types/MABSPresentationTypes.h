@@ -6,7 +6,7 @@
 #include "Camera/CameraShakeBase.h"
 #include "MABSPresentationTypes.generated.h"
 
-class UParticleSystem;
+class UNiagaraSystem;
 class USoundBase;
 
 USTRUCT(BlueprintType)
@@ -38,7 +38,7 @@ struct MABSCORE_API FMABSPresentationCueData
 	GENERATED_BODY()
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
-	TObjectPtr<UParticleSystem> VFX = nullptr;
+	TObjectPtr<UNiagaraSystem> VFX = nullptr;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
 	TObjectPtr<USoundBase> SFX = nullptr;
@@ -67,7 +67,7 @@ struct MABSCORE_API FMABSHitTraceTracerPresentationData
 	GENERATED_BODY()
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
-	TObjectPtr<UParticleSystem> TracerVFX = nullptr;
+	TObjectPtr<UNiagaraSystem> TracerVFX = nullptr;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
 	TObjectPtr<USoundBase> TracerSFX = nullptr;
@@ -84,7 +84,7 @@ struct MABSCORE_API FMABSProjectileTravelPresentationData
 	GENERATED_BODY()
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
-	TObjectPtr<UParticleSystem> TravelVFX = nullptr;
+	TObjectPtr<UNiagaraSystem> TravelVFX = nullptr;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Presentation")
 	TObjectPtr<USoundBase> TravelSFX = nullptr;

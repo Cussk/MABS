@@ -2,13 +2,13 @@
 
 ## What it is
 
-This document explains the current Phase 7.5 ability model: authored definitions, optional grouped ability sets, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional montage playback, and presentation.
+This document explains the current Phase 11 ability model: authored definitions, optional grouped ability sets, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional delivery handlers, optional montage playback, and presentation.
 
 ## Why it exists
 
 MABS stays readable by keeping authored data separate from live runtime state.
 
-Phase 7.5 keeps the Phase 7 combat model and adds a small authoring convenience: designers can now group multiple `UMABSAbilityDefinition` assets into one `UMABSAbilitySet` and grant them together.
+Phase 11 keeps the earlier combat model intact and adds one delivery authoring seam: abilities can now optionally point at a custom delivery handler class while the default built-in delivery behavior still works with no authoring change.
 
 ## Ability definitions
 
@@ -20,7 +20,7 @@ Current authored fields cover:
 * target intent and gameplay outcome: `TargetType`, `InstantEffectType`, `EffectMagnitude`
 * usage rules: `CooldownSeconds`, `CooldownGroupTag`, `ResourceCost`
 * timing: `StartupDuration`, `DeliveryTime`, `RecoveryDuration`
-* delivery and sockets: `DeliveryMode`, delivery socket fields, offsets, and optional montage fields
+* delivery and sockets: `DeliveryMode`, optional `DeliveryHandlerClass`, delivery socket fields, offsets, and optional montage fields
 * presentation: `StartupPresentation`, `DeliveryPresentation`, and `ImpactPresentation`
 * combat breadth: `Combo`, `AoE`, and `PeriodicEffect`
 
@@ -90,6 +90,7 @@ Authored data answers:
 * what one ability should do
 * how multiple abilities should be grouped for grant authoring
 * which delivery mode it uses
+* which optional delivery handler class it uses
 * whether it can branch into a combo follow-up
 * whether it resolves an AoE shape
 * whether it starts a periodic effect
@@ -112,9 +113,10 @@ Runtime state answers:
 1. Create one or more `UMABSAbilityDefinition` assets.
 2. Optionally create a `UMABSAbilitySet`.
 3. Fill `AbilityDefinitions` when several abilities should be granted together.
-4. Grant either the definition or the set on authority.
-5. Activate abilities with `TryActivateAbilityByTag`.
-6. Inspect `FMABSAbilitySpec`, active periodic effects, and recent debug events.
+4. Leave `DeliveryHandlerClass` empty to use the built-in handler for the authored delivery mode, or assign a custom handler class when one ability needs custom delivery behavior.
+5. Grant either the definition or the set on authority.
+6. Activate abilities with `TryActivateAbilityByTag`.
+7. Inspect `FMABSAbilitySpec`, active periodic effects, and recent debug events.
 
 ## Example
 

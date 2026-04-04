@@ -2,77 +2,119 @@
 
 ## What it is
 
-This document explains the Phase 7 delivery layer in MABS.
+This document explains the Phase 11 delivery layer in MABS.
+
+Phase 11 keeps the same built-in delivery modes, but moves their behavior behind public delivery handler classes so projects can extend delivery in C++ or Blueprint without editing core runtime code.
 
 ## Why it exists
 
-Earlier phases established delivery modes, timing, sockets, and presentation. Phase 7 keeps those delivery paths, but lets a successful delivery branch into a combo follow-up window, resolve an optional AoE, and start optional periodic effects.
+Before Phase 11, projectile delivery already had an obvious extension seam through `AMABSProjectileBase`, but hit trace and melee did not.
 
-## Current delivery modes
+Phase 11 fixes that by adding:
 
-### `Direct`
+* a shared `UMABSDeliveryHandler` base class
+* built-in direct / hit trace / melee / projectile handlers
+* an authored handler-class reference on `UMABSAbilityDefinition`
 
-Uses the direct target path and may now:
+## Built-in delivery handlers
 
-* apply to the direct target only
-* use self as the center for an AoE pulse
-* start periodic effects on the resolved actor set
+MABS now exposes:
 
-### `HitTrace`
+* `UMABSDirectDeliveryHandler`
+* `UMABSHitTraceDeliveryHandler`
+* `UMABSMeleeDeliveryHandler`
+* `UMABSProjectileDeliveryHandler`
 
-Uses an authority-side line trace or sphere trace at the authored delivery time and may now:
+If an ability does not assign a custom handler, MABS resolves the correct built-in handler from `DeliveryMode`.
 
-* apply to the first valid hit actor
-* expand to an AoE burst around the resolved hit
-* start periodic effects on affected actors
+## Authoring changes
 
-### `Melee`
+`UMABSAbilityDefinition` still uses the normal authored delivery data:
 
-Uses an authority-side sweep at the authored delivery time and may now:
+* `DeliveryMode`
+* delivery socket names and offsets
+* hit trace / melee / projectile authored fields
+* `AoE`
+* `PeriodicEffect`
+* presentation groups
 
-* apply to the first valid melee hit
-* expand to a follow-up AoE around that hit
-* open a combo window for a simple authored follow-up ability
-* start periodic effects on affected actors
+Phase 11 adds one optional authored class reference:
 
-### `Projectile`
+* `DeliveryHandlerClass`
 
-Spawns an authority-side projectile actor at the authored delivery time and may now:
+Leave it empty to use the built-in handler. Set it only when one ability needs custom delivery behavior.
 
-* apply to the hit actor on impact
-* resolve AoE from the impact point, even when the projectile hits world geometry
-* start periodic effects on affected actors
+## Runtime behavior
+
+On authority, MABS now:
+
+1. resolves the authored custom handler or the built-in default handler
+2. builds a transient `FMABSDeliveryExecutionContext`
+3. runs the handler
+4. reads back a transient `FMABSDeliveryExecutionResult`
+5. continues normal effect application, impact presentation, cost, cooldown, and recovery flow on `UMABSAbilityComponent`
+
+Handlers do not own authoritative gameplay state or replicated state.
 
 ## Commit rules
 
+The commit rules stay the same:
+
 `Direct`, `HitTrace`, and `Melee`:
 
-* commit after delivery succeeds and at least one gameplay effect applies
+* commit after delivery succeeds and standard gameplay flow reaches cost/cooldown finalization
 
 `Projectile`:
 
 * commits after authoritative projectile spawn succeeds
 * applies instant and periodic gameplay outcomes later on authoritative impact
 
-Presentation is still cosmetic:
+## How to extend it
 
-* it triggers at startup, delivery, travel, or impact timing points
-* it does not decide gameplay success
-* missing cosmetic data does not become gameplay authority
+Use the smallest handler base that matches the authored delivery mode:
+
+* derive from `UMABSHitTraceDeliveryHandler` for custom ranged instant-shot logic
+* derive from `UMABSMeleeDeliveryHandler` for custom close-range strike logic
+* derive from `UMABSProjectileDeliveryHandler` for custom projectile spawn / routing logic
+* derive from `UMABSDirectDeliveryHandler` for direct-target customization
+
+Built-in hit trace and melee handlers expose a Blueprint/C++ hook through `ModifyDeliveryResult(...)`, so a subclass can:
+
+* trim or reorder targets
+* add knockback or pull logic
+* add extra delivery-side rules
+* keep normal MABS effects, presentation, cooldown, and cost flow
+
+## AoE note
+
+AoE is still part of delivery and targeting in Phase 11.
+
+This phase does not add a separate AoE handler framework.
 
 ## How to use it
 
-1. Set `DeliveryMode` on `UMABSAbilityDefinition`.
-2. Set `StartupDuration`, `DeliveryTime`, and `RecoveryDuration`.
-3. Fill delivery-specific fields and socket fields.
-4. Enable `AoE` or `PeriodicEffect` only when the ability needs them.
-5. Fill the relevant presentation groups for that delivery mode.
-6. Grant the ability on authority.
-7. Activate it by tag.
+1. Author the normal delivery mode and delivery data on `UMABSAbilityDefinition`.
+2. Leave `DeliveryHandlerClass` empty for default behavior.
+3. Create a C++ or Blueprint subclass of the appropriate built-in delivery handler when one ability needs custom delivery logic.
+4. Assign that handler class to `DeliveryHandlerClass`.
+5. Grant and activate the ability on authority as usual.
 
 ## Example
 
-* self-heal pulse uses `Direct` with `AoE` and `PeriodicEffect = HOT`
-* rifle shot uses `HitTrace` with a small AoE burst on impact
-* sword slash uses `Melee` with combo follow-up support
-* fireball uses `Projectile` with impact AoE and a burn periodic effect
+Example custom rifle shot:
+
+* `DeliveryMode = HitTrace`
+* `DeliveryHandlerClass = UMABSExampleKnockbackHitTraceDeliveryHandler`
+* built-in hit trace still resolves the target
+* the custom handler adds a knockback impulse to each resolved target
+* normal MABS effects, impact presentation, cooldown, and recovery still run
+
+## Not included
+
+Phase 11 does not add:
+
+* a separate AoE handler framework
+* client-side prediction
+* handler-owned replicated state
+* handler-owned timers
+* a new projectile actor model

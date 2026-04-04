@@ -3,6 +3,11 @@
 #include "Components/MABSAbilityRuntime_EventNames.h"
 
 #include "Actors/MABSProjectileBase.h"
+#include "Delivery/MABSDeliveryHandler.h"
+#include "Delivery/MABSDirectDeliveryHandler.h"
+#include "Delivery/MABSHitTraceDeliveryHandler.h"
+#include "Delivery/MABSMeleeDeliveryHandler.h"
+#include "Delivery/MABSProjectileDeliveryHandler.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -43,6 +48,45 @@ namespace
 
 		return ObjectQueryParams;
 	}
+
+	void AddResolvedTargetActor(TArray<AActor*>& TargetActors, AActor* TargetActor)
+	{
+		if (TargetActor != nullptr && !TargetActors.Contains(TargetActor))
+		{
+			TargetActors.Add(TargetActor);
+		}
+	}
+
+	FMABSResolvedAbilityTarget BuildPresentationResolvedTarget(
+		const FMABSDeliveryExecutionResult& DeliveryResult,
+		const TArray<AActor*>& TargetActors)
+	{
+		FMABSResolvedAbilityTarget ResolvedTarget;
+		ResolvedTarget.TargetActor = DeliveryResult.PrimaryTargetActor;
+		if (ResolvedTarget.TargetActor == nullptr && !TargetActors.IsEmpty())
+		{
+			ResolvedTarget.TargetActor = TargetActors[0];
+		}
+
+		if (DeliveryResult.bHasImpact)
+		{
+			ResolvedTarget.ImpactHitResult = DeliveryResult.PrimaryHitResult;
+			ResolvedTarget.bHasImpactHitResult = true;
+			return ResolvedTarget;
+		}
+
+		if (!DeliveryResult.ImpactLocation.IsNearlyZero() || !DeliveryResult.ImpactNormal.IsNearlyZero())
+		{
+			ResolvedTarget.ImpactHitResult.Location = DeliveryResult.ImpactLocation;
+			ResolvedTarget.ImpactHitResult.ImpactPoint = DeliveryResult.ImpactLocation;
+			ResolvedTarget.ImpactHitResult.ImpactNormal = !DeliveryResult.ImpactNormal.IsNearlyZero()
+				? DeliveryResult.ImpactNormal
+				: FVector::UpVector;
+			ResolvedTarget.bHasImpactHitResult = true;
+		}
+
+		return ResolvedTarget;
+	}
 }
 
 using namespace MABSAbilityRuntimeInternal;
@@ -74,117 +118,13 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 	}
 
 	const EMABSDeliveryMode DeliveryMode = AbilityDefinition->DeliveryMode;
-	const FMABSAbilityDebugEvent DeliveryStartedEvent = EmitDebugEvent(
-		MABSAbilityComponentEventNames::DeliveryStarted,
-		AbilitySpec.AbilityTag,
-		AbilitySpec.Handle,
-		AbilitySpec.RuntimeState,
-		EMABSAbilityActivationResult::Success,
-		FString::Printf(
-			TEXT("Started %s delivery for ability '%s'."),
-			*GetDeliveryModeLabel(DeliveryMode),
-			*GetAbilityLabel(AbilityDefinition)));
-	if (bNotifyOwningClient)
+	FString HandlerResolutionMessage;
+	UClass* const HandlerClass = ResolveDeliveryHandlerClass(AbilityDefinition, HandlerResolutionMessage);
+	const UMABSDeliveryHandler* const DeliveryHandler = HandlerClass != nullptr
+		? HandlerClass->GetDefaultObject<UMABSDeliveryHandler>()
+		: nullptr;
+	if (DeliveryHandler == nullptr)
 	{
-		EmitDebugEventToOwningClient(DeliveryStartedEvent);
-	}
-
-	switch (DeliveryMode)
-	{
-	case EMABSDeliveryMode::Direct:
-		{
-			FString DeliveryDebugMessage;
-			const FMABSResolvedAbilityTarget ResolvedTarget = ExecuteDirectDelivery(
-				AbilitySpec,
-				DeliveryDebugMessage,
-				bNotifyOwningClient);
-			if (ResolvedTarget.TargetActor == nullptr)
-			{
-				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::TargetResolutionFailed;
-				ClearAbilityExecutionContext(AbilitySpec.Handle, true);
-
-				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-					MABSAbilityComponentEventNames::TargetResolutionFailed,
-					AbilitySpec.AbilityTag,
-					AbilitySpec.Handle,
-					AbilitySpec.RuntimeState,
-					EMABSAbilityActivationResult::TargetResolutionFailed,
-					DeliveryDebugMessage);
-				if (bNotifyOwningClient)
-				{
-					EmitDebugEventToOwningClient(DebugEvent);
-				}
-
-				return EMABSAbilityActivationResult::TargetResolutionFailed;
-			}
-
-			const FMABSAbilityDebugEvent TargetResolvedEvent = EmitDebugEvent(
-				MABSAbilityComponentEventNames::TargetResolved,
-				AbilitySpec.AbilityTag,
-				AbilitySpec.Handle,
-				AbilitySpec.RuntimeState,
-				EMABSAbilityActivationResult::Success,
-				DeliveryDebugMessage);
-			if (bNotifyOwningClient)
-			{
-				EmitDebugEventToOwningClient(TargetResolvedEvent);
-			}
-
-			return CompleteResolvedTargetAbility(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
-		}
-
-	case EMABSDeliveryMode::HitTrace:
-		{
-			FString DeliveryDebugMessage;
-			const FMABSResolvedAbilityTarget ResolvedTarget = ExecuteHitTraceDelivery(
-				AbilitySpec,
-				DeliveryDebugMessage,
-				bNotifyOwningClient);
-			if (ResolvedTarget.TargetActor == nullptr)
-			{
-				AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-				AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
-				ClearAbilityExecutionContext(AbilitySpec.Handle, true);
-
-				const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-					MABSAbilityComponentEventNames::DeliveryFailed,
-					AbilitySpec.AbilityTag,
-					AbilitySpec.Handle,
-					AbilitySpec.RuntimeState,
-					EMABSAbilityActivationResult::DeliveryFailed,
-					DeliveryDebugMessage);
-				if (bNotifyOwningClient)
-				{
-					EmitDebugEventToOwningClient(DebugEvent);
-				}
-
-				return EMABSAbilityActivationResult::DeliveryFailed;
-			}
-
-			return CompleteResolvedTargetAbility(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
-		}
-
-	case EMABSDeliveryMode::Melee:
-		{
-			FString DeliveryDebugMessage;
-			const FMABSResolvedAbilityTarget ResolvedTarget = ExecuteMeleeDelivery(
-				AbilitySpec,
-				DeliveryDebugMessage,
-				bNotifyOwningClient);
-			if (ResolvedTarget.TargetActor == nullptr)
-			{
-				// Melee swings can still commit on a whiff so recovery, combo windows, and queued follow-ups survive.
-				return FinalizeAbilityCommit(AbilitySpec, DeliveryMode, bNotifyOwningClient);
-			}
-
-			return CompleteResolvedTargetAbility(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
-		}
-
-	case EMABSDeliveryMode::Projectile:
-		return ExecuteProjectileDelivery(AbilitySpec, bNotifyOwningClient);
-
-	default:
 		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
 		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::InvalidAbility;
 		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
@@ -195,7 +135,9 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 			AbilitySpec.Handle,
 			AbilitySpec.RuntimeState,
 			EMABSAbilityActivationResult::InvalidAbility,
-			TEXT("CommitAbility failed because the authored delivery mode is not supported."));
+			HandlerResolutionMessage.IsEmpty()
+				? TEXT("CommitAbility failed because no valid delivery handler could be resolved.")
+				: HandlerResolutionMessage);
 		if (bNotifyOwningClient)
 		{
 			EmitDebugEventToOwningClient(DebugEvent);
@@ -203,6 +145,26 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CommitAbility(FMABSAbilitySp
 
 		return EMABSAbilityActivationResult::InvalidAbility;
 	}
+
+	const FMABSAbilityDebugEvent DeliveryStartedEvent = EmitDebugEvent(
+		MABSAbilityComponentEventNames::DeliveryStarted,
+		AbilitySpec.AbilityTag,
+		AbilitySpec.Handle,
+		AbilitySpec.RuntimeState,
+		EMABSAbilityActivationResult::Success,
+		FString::Printf(
+			TEXT("Started %s delivery for ability '%s' using handler '%s'."),
+			*GetDeliveryModeLabel(DeliveryMode),
+			*GetAbilityLabel(AbilityDefinition),
+			*GetNameSafe(HandlerClass)));
+	if (bNotifyOwningClient)
+	{
+		EmitDebugEventToOwningClient(DeliveryStartedEvent);
+	}
+
+	const FMABSDeliveryExecutionContext DeliveryContext = BuildDeliveryExecutionContext(AbilitySpec, bNotifyOwningClient);
+	const FMABSDeliveryExecutionResult DeliveryResult = DeliveryHandler->ExecuteDelivery(DeliveryContext);
+	return CompleteDeliveryExecutionResult(AbilitySpec, DeliveryResult, DeliveryMode, bNotifyOwningClient);
 }
 
 
@@ -348,256 +310,242 @@ FMABSResolvedAbilityTarget UMABSAbilityComponent::ExecuteMeleeDelivery(
 }
 
 
-EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
-	FMABSAbilitySpec& AbilitySpec,
-	const bool bNotifyOwningClient)
+FMABSDeliveryExecutionContext UMABSAbilityComponent::BuildDeliveryExecutionContext(
+	const FMABSAbilitySpec& AbilitySpec,
+	const bool bNotifyOwningClient) const
 {
-	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
-	UWorld* const World = GetWorld();
-	if (AbilityDefinition == nullptr || World == nullptr)
+	FMABSDeliveryExecutionContext Context;
+	Context.AbilityComponent = const_cast<UMABSAbilityComponent*>(this);
+	Context.AbilityDefinition = AbilitySpec.AbilityDefinition;
+	Context.AbilitySpec = AbilitySpec;
+	Context.SourceActor = GetOwner();
+	Context.DeliveryMode = AbilitySpec.AbilityDefinition != nullptr
+		? AbilitySpec.AbilityDefinition->DeliveryMode
+		: EMABSDeliveryMode::Direct;
+	Context.bNotifyOwningClient = bNotifyOwningClient;
+
+	if (Context.SourceActor != nullptr)
 	{
-		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
-		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
-
-		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::DeliveryFailed,
-			TEXT("Projectile delivery failed because the world or ability definition was unavailable."));
-		if (bNotifyOwningClient)
+		Context.SourceTransform = Context.SourceActor->GetActorTransform();
+		Context.InstigatorPawn = Context.SourceActor->GetInstigator();
+		Context.InstigatorController = Context.SourceActor->GetInstigatorController();
+		if (Context.InstigatorPawn == nullptr)
 		{
-			EmitDebugEventToOwningClient(DebugEvent);
+			Context.InstigatorPawn = Cast<APawn>(Context.SourceActor);
 		}
-
-		const FMABSAbilityDebugEvent DeliveryFailedEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::DeliveryFailed,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::DeliveryFailed,
-			TEXT("Projectile delivery failed before the projectile could spawn."));
-		if (bNotifyOwningClient)
+		if (Context.InstigatorController == nullptr && Context.InstigatorPawn != nullptr)
 		{
-			EmitDebugEventToOwningClient(DeliveryFailedEvent);
-		}
-
-		return EMABSAbilityActivationResult::DeliveryFailed;
-	}
-
-	FTransform SpawnTransform = FTransform::Identity;
-	FString SpawnTransformMessage;
-	if (!GetProjectileSpawnTransform(*AbilityDefinition, SpawnTransform, SpawnTransformMessage, bNotifyOwningClient))
-	{
-		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
-		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
-
-		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::DeliveryFailed,
-			SpawnTransformMessage);
-		if (bNotifyOwningClient)
-		{
-			EmitDebugEventToOwningClient(DebugEvent);
-		}
-
-		const FMABSAbilityDebugEvent DeliveryFailedEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::DeliveryFailed,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::DeliveryFailed,
-			SpawnTransformMessage);
-		if (bNotifyOwningClient)
-		{
-			EmitDebugEventToOwningClient(DeliveryFailedEvent);
-		}
-
-		return EMABSAbilityActivationResult::DeliveryFailed;
-	}
-
-	TriggerDeliveryPresentation(AbilitySpec, EMABSDeliveryMode::Projectile, bNotifyOwningClient);
-	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
-
-	AMABSProjectileBase* Projectile = World->SpawnActorDeferred<AMABSProjectileBase>(
-		AbilityDefinition->ProjectileActorClass,
-		SpawnTransform,
-		GetOwner(),
-		GetOwner() != nullptr ? GetOwner()->GetInstigator() : nullptr,
-		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding);
-	if (Projectile == nullptr)
-	{
-		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::DeliveryFailed;
-		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
-
-		const FString SpawnFailedMessage = FString::Printf(
-			TEXT("Projectile delivery failed because class '%s' could not be spawned. %s"),
-			*GetNameSafe(AbilityDefinition->ProjectileActorClass),
-			*SpawnTransformMessage);
-		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::ProjectileSpawnFailed,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::DeliveryFailed,
-			SpawnFailedMessage);
-		if (bNotifyOwningClient)
-		{
-			EmitDebugEventToOwningClient(DebugEvent);
-		}
-
-		const FMABSAbilityDebugEvent DeliveryFailedEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::DeliveryFailed,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::DeliveryFailed,
-			SpawnFailedMessage);
-		if (bNotifyOwningClient)
-		{
-			EmitDebugEventToOwningClient(DeliveryFailedEvent);
-		}
-
-		return EMABSAbilityActivationResult::DeliveryFailed;
-	}
-
-	Projectile->InitializeProjectile(this, GetOwner(), AbilitySpec.AbilityDefinition, AbilitySpec.AbilityTag, AbilitySpec.Handle);
-	UGameplayStatics::FinishSpawningActor(Projectile, SpawnTransform);
-
-	const FMABSAbilityDebugEvent ProjectileSpawnedEvent = EmitDebugEvent(
-		MABSAbilityComponentEventNames::ProjectileSpawned,
-		AbilitySpec.AbilityTag,
-		AbilitySpec.Handle,
-		AbilitySpec.RuntimeState,
-		EMABSAbilityActivationResult::Success,
-		FString::Printf(
-			TEXT("Spawned projectile '%s' for ability '%s' at %s."),
-			*GetNameSafe(Projectile),
-			*GetAbilityLabel(AbilityDefinition),
-			*FormatVectorForDebug(SpawnTransform.GetLocation())));
-	if (bNotifyOwningClient)
-	{
-		EmitDebugEventToOwningClient(ProjectileSpawnedEvent);
-	}
-
-	if (AbilityDefinition->DeliveryPresentation.ProjectileTravel.HasAnyPresentation())
-	{
-		const FMABSAbilityDebugEvent CueRoutedEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::PresentationCueRouted,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::Success,
-			FString::Printf(
-				TEXT("Routed ProjectileTravel cue with policy %s through the replicated projectile '%s'. Assets: VFX=%s, SFX=%s."),
-				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
-				*GetNameSafe(Projectile),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX.Get()),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX.Get())));
-		if (bNotifyOwningClient)
-		{
-			EmitDebugEventToOwningClient(CueRoutedEvent);
-		}
-
-		const FMABSAbilityDebugEvent TravelPresentationEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::ProjectileTravelPresentationTriggered,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::Success,
-			FString::Printf(
-				TEXT("Hooked projectile travel cue for projectile '%s' with policy %s. Assets: VFX=%s, SFX=%s."),
-				*GetNameSafe(Projectile),
-				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX.Get()),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX.Get())));
-		if (bNotifyOwningClient)
-		{
-			EmitDebugEventToOwningClient(TravelPresentationEvent);
+			Context.InstigatorController = Context.InstigatorPawn->GetController();
 		}
 	}
 
-	return FinalizeAbilityCommit(AbilitySpec, EMABSDeliveryMode::Projectile, bNotifyOwningClient);
+	FVector ViewPointLocation = FVector::ZeroVector;
+	FRotator ViewPointRotation = FRotator::ZeroRotator;
+	FString ViewPointDescription;
+	if (GetTargetTraceViewPoint(ViewPointLocation, ViewPointRotation, ViewPointDescription))
+	{
+		Context.bHasViewPoint = true;
+		Context.ViewPointLocation = ViewPointLocation;
+		Context.ViewPointRotation = ViewPointRotation;
+		Context.ViewPointDescription = ViewPointDescription;
+	}
+
+	return Context;
 }
 
 
-EMABSAbilityActivationResult UMABSAbilityComponent::CompleteResolvedTargetAbility(
+UClass* UMABSAbilityComponent::ResolveDeliveryHandlerClass(
+	const UMABSAbilityDefinition* AbilityDefinition,
+	FString& OutDebugMessage) const
+{
+	if (AbilityDefinition == nullptr)
+	{
+		OutDebugMessage = TEXT("No delivery handler could be resolved because the ability definition was invalid.");
+		return nullptr;
+	}
+
+	if (!AbilityDefinition->DeliveryHandlerClass.IsNull())
+	{
+		UClass* HandlerClass = AbilityDefinition->DeliveryHandlerClass.ResolveClass();
+		if (HandlerClass == nullptr)
+		{
+			HandlerClass = AbilityDefinition->DeliveryHandlerClass.TryLoadClass<UObject>();
+		}
+
+		if (HandlerClass == nullptr)
+		{
+			OutDebugMessage = FString::Printf(
+				TEXT("Delivery handler class '%s' could not be loaded for ability '%s'."),
+				*AbilityDefinition->DeliveryHandlerClass.ToString(),
+				*GetAbilityLabel(AbilityDefinition));
+			return nullptr;
+		}
+
+		if (!HandlerClass->IsChildOf(UMABSDeliveryHandler::StaticClass()))
+		{
+			OutDebugMessage = FString::Printf(
+				TEXT("Delivery handler class '%s' is not derived from UMABSDeliveryHandler for ability '%s'."),
+				*GetNameSafe(HandlerClass),
+				*GetAbilityLabel(AbilityDefinition));
+			return nullptr;
+		}
+
+		if (HandlerClass->HasAnyClassFlags(CLASS_Abstract))
+		{
+			OutDebugMessage = FString::Printf(
+				TEXT("Delivery handler class '%s' is abstract and cannot execute ability '%s'."),
+				*GetNameSafe(HandlerClass),
+				*GetAbilityLabel(AbilityDefinition));
+			return nullptr;
+		}
+
+		OutDebugMessage = FString::Printf(
+			TEXT("Resolved authored delivery handler '%s' for ability '%s'."),
+			*GetNameSafe(HandlerClass),
+			*GetAbilityLabel(AbilityDefinition));
+		return HandlerClass;
+	}
+
+	UClass* HandlerClass = nullptr;
+	switch (AbilityDefinition->DeliveryMode)
+	{
+	case EMABSDeliveryMode::Direct:
+		HandlerClass = UMABSDirectDeliveryHandler::StaticClass();
+		break;
+
+	case EMABSDeliveryMode::HitTrace:
+		HandlerClass = UMABSHitTraceDeliveryHandler::StaticClass();
+		break;
+
+	case EMABSDeliveryMode::Melee:
+		HandlerClass = UMABSMeleeDeliveryHandler::StaticClass();
+		break;
+
+	case EMABSDeliveryMode::Projectile:
+		HandlerClass = UMABSProjectileDeliveryHandler::StaticClass();
+		break;
+
+	default:
+		break;
+	}
+
+	if (HandlerClass == nullptr)
+	{
+		OutDebugMessage = FString::Printf(
+			TEXT("No built-in delivery handler is registered for delivery mode '%s' on ability '%s'."),
+			*GetDeliveryModeLabel(AbilityDefinition->DeliveryMode),
+			*GetAbilityLabel(AbilityDefinition));
+		return nullptr;
+	}
+
+	OutDebugMessage = FString::Printf(
+		TEXT("Resolved built-in delivery handler '%s' for ability '%s'."),
+		*GetNameSafe(HandlerClass),
+		*GetAbilityLabel(AbilityDefinition));
+	return HandlerClass;
+}
+
+
+EMABSAbilityActivationResult UMABSAbilityComponent::CompleteDeliveryExecutionResult(
 	FMABSAbilitySpec& AbilitySpec,
-	const FMABSResolvedAbilityTarget& ResolvedTarget,
+	const FMABSDeliveryExecutionResult& DeliveryResult,
 	const EMABSDeliveryMode DeliveryMode,
 	const bool bNotifyOwningClient)
 {
+	const EMABSAbilityActivationResult DefaultFailureResult = DeliveryMode == EMABSDeliveryMode::Direct
+		? EMABSAbilityActivationResult::TargetResolutionFailed
+		: EMABSAbilityActivationResult::DeliveryFailed;
+
+	if (!DeliveryResult.bDeliverySucceeded)
+	{
+		const EMABSAbilityActivationResult FailureResult = DeliveryResult.FailureResult != EMABSAbilityActivationResult::None
+			? DeliveryResult.FailureResult
+			: DefaultFailureResult;
+		const FName FailureEventName = DeliveryResult.FailureEventName != NAME_None
+			? DeliveryResult.FailureEventName
+			: (FailureResult == EMABSAbilityActivationResult::TargetResolutionFailed
+				? MABSAbilityComponentEventNames::TargetResolutionFailed
+				: MABSAbilityComponentEventNames::DeliveryFailed);
+
+		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
+		AbilitySpec.LastActivationResult = FailureResult;
+		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
+
+		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
+			FailureEventName,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			FailureResult,
+			DeliveryResult.DebugMessage.IsEmpty()
+				? FString::Printf(
+					TEXT("%s delivery failed for ability '%s'."),
+					*GetDeliveryModeLabel(DeliveryMode),
+					*GetAbilityLabel(AbilitySpec.AbilityDefinition))
+				: DeliveryResult.DebugMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(DebugEvent);
+		}
+
+		return FailureResult;
+	}
+
 	AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Active;
 
 	TArray<AActor*> TargetActors;
-	const UMABSAbilityDefinition* const AbilityDefinition = AbilitySpec.AbilityDefinition;
-	FString TargetResolutionMessage;
-	if (AbilityDefinition != nullptr && AbilityDefinition->AoE.IsValid())
+	for (const TObjectPtr<AActor>& TargetActor : DeliveryResult.ResolvedTargetActors)
 	{
-		if (!ResolveAoETargets(AbilitySpec, ResolvedTarget, TargetActors, TargetResolutionMessage, bNotifyOwningClient))
-		{
-			const EMABSAbilityActivationResult FailureResult = DeliveryMode == EMABSDeliveryMode::Direct
-				? EMABSAbilityActivationResult::TargetResolutionFailed
-				: EMABSAbilityActivationResult::DeliveryFailed;
-			const FName FailureEventName = DeliveryMode == EMABSDeliveryMode::Direct
-				? MABSAbilityComponentEventNames::TargetResolutionFailed
-				: MABSAbilityComponentEventNames::DeliveryFailed;
+		AddResolvedTargetActor(TargetActors, TargetActor.Get());
+	}
 
+	if (DeliveryMode == EMABSDeliveryMode::Direct && DeliveryResult.PrimaryTargetActor != nullptr)
+	{
+		const FMABSAbilityDebugEvent TargetResolvedEvent = EmitDebugEvent(
+			MABSAbilityComponentEventNames::TargetResolved,
+			AbilitySpec.AbilityTag,
+			AbilitySpec.Handle,
+			AbilitySpec.RuntimeState,
+			EMABSAbilityActivationResult::Success,
+			DeliveryResult.DebugMessage);
+		if (bNotifyOwningClient)
+		{
+			EmitDebugEventToOwningClient(TargetResolvedEvent);
+		}
+	}
+
+	if (DeliveryResult.bApplyStandardEffects)
+	{
+		TArray<AActor*> AffectedTargets;
+		FString EffectFailureMessage;
+		if (!ApplyGameplayEffectsToTargets(AbilitySpec, TargetActors, AffectedTargets, EffectFailureMessage, bNotifyOwningClient))
+		{
 			AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-			AbilitySpec.LastActivationResult = FailureResult;
+			AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::EffectApplicationFailed;
 			ClearAbilityExecutionContext(AbilitySpec.Handle, true);
 
 			const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-				FailureEventName,
+				MABSAbilityComponentEventNames::EffectApplicationFailed,
 				AbilitySpec.AbilityTag,
 				AbilitySpec.Handle,
 				AbilitySpec.RuntimeState,
-				FailureResult,
-				TargetResolutionMessage);
+				EMABSAbilityActivationResult::EffectApplicationFailed,
+				EffectFailureMessage);
 			if (bNotifyOwningClient)
 			{
 				EmitDebugEventToOwningClient(DebugEvent);
 			}
 
-			return FailureResult;
+			return EMABSAbilityActivationResult::EffectApplicationFailed;
 		}
 	}
-	else if (ResolvedTarget.TargetActor != nullptr)
+
+	if (DeliveryResult.bTriggerStandardImpactPresentation)
 	{
-		TargetActors.Add(ResolvedTarget.TargetActor);
+		const FMABSResolvedAbilityTarget PresentationTarget = BuildPresentationResolvedTarget(DeliveryResult, TargetActors);
+		TriggerImpactPresentation(AbilitySpec, PresentationTarget, DeliveryMode, bNotifyOwningClient);
 	}
 
-	TArray<AActor*> AffectedTargets;
-	FString EffectFailureMessage;
-	if (!ApplyGameplayEffectsToTargets(AbilitySpec, TargetActors, AffectedTargets, EffectFailureMessage, bNotifyOwningClient))
-	{
-		AbilitySpec.RuntimeState = EMABSAbilityRuntimeState::Idle;
-		AbilitySpec.LastActivationResult = EMABSAbilityActivationResult::EffectApplicationFailed;
-		ClearAbilityExecutionContext(AbilitySpec.Handle, true);
-
-		const FMABSAbilityDebugEvent DebugEvent = EmitDebugEvent(
-			MABSAbilityComponentEventNames::EffectApplicationFailed,
-			AbilitySpec.AbilityTag,
-			AbilitySpec.Handle,
-			AbilitySpec.RuntimeState,
-			EMABSAbilityActivationResult::EffectApplicationFailed,
-			EffectFailureMessage);
-		if (bNotifyOwningClient)
-		{
-			EmitDebugEventToOwningClient(DebugEvent);
-		}
-
-		return EMABSAbilityActivationResult::EffectApplicationFailed;
-	}
-
-	TriggerImpactPresentation(AbilitySpec, ResolvedTarget, DeliveryMode, bNotifyOwningClient);
 	return FinalizeAbilityCommit(AbilitySpec, DeliveryMode, bNotifyOwningClient);
 }
 

@@ -2,23 +2,28 @@
 
 ## What it is
 
-This document explains the built-in projectile path in MABS after Phase 6.5 cue routing.
+This document explains the built-in projectile path in MABS after the Phase 11 delivery-handler pass.
 
 ## Why it exists
 
-Projectiles are one of the most common expected delivery modes for practical combat abilities. Phase 6 added spawn, travel, and impact presentation. Phase 6.5 keeps that feature set, but routes projectile travel through the same lightweight cue model used by the rest of the presentation layer.
+Projectiles are still the world-space delivery mode for abilities that travel over time.
 
-## Built-in runtime type
+Phase 11 keeps the existing projectile actor model, but adds `UMABSProjectileDeliveryHandler` so projectile spawn and routing use the same delivery-handler system as the other delivery modes.
+
+## Built-in runtime types
+
+`UMABSProjectileDeliveryHandler` in `MABSGameplay`:
+
+* owns authoritative projectile spawn / routing
+* commits the ability after projectile spawn succeeds
 
 `AMABSProjectileBase` in `MABSGameplay`:
 
 * replicates movement
 * stores replicated source ability context
 * routes impact handling back through `UMABSAbilityComponent`
-* applies the authored instant effect on a valid impact
-* builds a lightweight projectile-travel cue event from authored data
-* evaluates travel cue visibility locally on each instance
-* activates authored projectile travel Niagara VFX and SFX when the cue policy allows it
+* applies the authored instant and periodic effects on authoritative impact
+* realizes projectile-travel presentation locally from replicated cue data
 
 ## Authored fields
 
@@ -26,11 +31,11 @@ Use:
 
 * `TargetType = Actor`
 * `DeliveryMode = Projectile`
+* optional `DeliveryHandlerClass`
 * `ProjectileActorClass`
 * `ProjectileSpawnOffset`
 * `DeliveryPresentation.Cue`
 * `DeliveryPresentation.ProjectileTravel`
-* `DeliveryPresentation.ProjectileTravel.VisibilityPolicy`
 * `ImpactPresentation.Cue`
 
 `ProjectileActorClass` must derive from `AMABSProjectileBase`.
@@ -43,32 +48,25 @@ Projectile abilities still work the same way for gameplay:
 * successful spawn commits the ability
 * the effect applies later on authoritative impact
 
-Presentation behavior is now:
+Phase 11 only changes the spawn side:
 
-* delivery cue routes at projectile spawn time
-* projectile travel builds a `FMABSProjectileTravelCueEvent`
-* the replicated projectile realizes travel presentation locally only when the authored visibility policy allows it
-* impact presentation routes through the same cue helper path used by other presentation phases
+* the delivery runtime now resolves `UMABSProjectileDeliveryHandler`
+* the built-in projectile handler performs the authoritative spawn
+* impact still routes through `AMABSProjectileBase`
 
-## Debug events
+## How to extend it
 
 Use:
 
-* `ProjectileSpawned`
-* `ProjectileTravelPresentationTriggered`
-* `PresentationCueRouted`
-* `PresentationCueSkipped`
-* `PresentationCueRealized`
-* `ProjectileImpact`
-* `ImpactPresentationTriggered`
+* a `UMABSProjectileDeliveryHandler` subclass when you want custom projectile spawn / routing behavior
+* an `AMABSProjectileBase` subclass when you want custom in-world projectile behavior or impact behavior
 
 ## Example
 
-Example fireball:
+Example custom fireball spawn:
 
+* `DeliveryMode = Projectile`
+* `DeliveryHandlerClass = UMyGameCustomProjectileHandler`
 * `ProjectileActorClass = BP_MABS_Fireball`
-* `ProjectileSpawnSocketName = hand_r`
-* `DeliveryPresentation.Cue.VFX = NS_FireballCast`
-* `DeliveryPresentation.ProjectileTravel.TravelVFX = NS_FireballTrail`
-* `DeliveryPresentation.ProjectileTravel.VisibilityPolicy = RelevantClients`
-* `ImpactPresentation.Cue.VFX = NS_FireballImpact`
+* the custom handler changes spawn / routing rules
+* `AMABSProjectileBase` still handles the projectile’s replicated in-world life

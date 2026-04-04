@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 10 runtime architecture for MABS after the helper ownership cleanup pass.
+This document explains the Phase 11 runtime architecture for MABS after the delivery-handler extensibility pass.
 
-The goal is still to keep runtime behavior stable while giving each major runtime concern a clearer internal home, but Phase 10 now applies that ownership rule to private helper code as well.
+The goal is still to keep runtime behavior stable while giving each major runtime concern a clearer internal home, and Phase 11 adds a public extension seam for delivery without moving gameplay state out of the component.
 
 ## Module map
 
@@ -14,6 +14,7 @@ Owns:
 
 * authored data assets
 * shared enums and runtime structs
+* authored delivery-handler class reference on `UMABSAbilityDefinition`
 * combo, AoE, cooldown, and periodic-effect authored data
 * shared debug event and summary read-model types
 
@@ -23,6 +24,8 @@ Owns:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
+* public delivery-handler context/result structs
+* public delivery-handler base and built-in handler classes
 * server-authoritative granting, activation, delivery, cooldown, cost, combo, AoE, and periodic-effect execution
 * replicated runtime state
 * runtime debug event emission and summary query accessors
@@ -127,7 +130,8 @@ Owns:
 
 Owns:
 
-* direct, hit trace, melee, and projectile delivery
+* delivery handler resolution
+* direct, hit trace, melee, and projectile built-in handler execution
 * target resolution
 * delivery socket/origin resolution
 * AoE gather from impact context
@@ -181,7 +185,7 @@ Primary transient runtime state:
 
 That means the new runtime units separate behavior ownership, not state ownership.
 
-Phase 10 keeps that rule intact. The helper cleanup does not move authoritative or replicated gameplay state off `UMABSAbilityComponent`.
+Phase 11 keeps that rule intact. Delivery handlers only consume a transient execution context and return a transient execution result. They do not own replicated state, cooldown state, active execution state, or periodic-effect state.
 
 ## Runtime flow
 
@@ -189,10 +193,11 @@ Phase 10 keeps that rule intact. The helper cleanup does not move authoritative 
 2. Gameplay code calls `TryActivateAbilityByTag`.
 3. The activation runtime validates grant, runtime state, cooldown, cost, and authored gameplay effect data.
 4. Startup and recovery timing are coordinated by the activation runtime.
-5. The delivery runtime resolves direct, trace, melee, or projectile delivery.
-6. The effects runtime applies instant and periodic results and finalizes cost/cooldown state.
-7. The presentation runtime routes montage and cue work.
-8. The debug runtime records events and assembles summary read models for the harness.
+5. The delivery runtime resolves the authored or built-in delivery handler for the ability.
+6. The handler performs authoritative delivery work and returns resolved targets and impact data.
+7. The effects runtime applies instant and periodic results and finalizes cost/cooldown state.
+8. The presentation runtime routes montage and cue work.
+9. The debug runtime records events and assembles summary read models for the harness.
 
 ## Debug read-model flow
 
@@ -213,7 +218,8 @@ Extend MABS by touching the smallest owning layer:
 * new authored data fields belong in `MABSCore`
 * new grant rules belong in granting runtime
 * new activation or combo behavior belongs in activation runtime
-* new delivery logic belongs in delivery runtime
+* new built-in delivery logic belongs in the delivery runtime or built-in handler classes
+* new project-specific delivery behavior belongs in a custom delivery handler class
 * new gameplay outcomes belong in effects runtime
 * new cue/montage work belongs in presentation runtime
 * new summaries belong in debug runtime

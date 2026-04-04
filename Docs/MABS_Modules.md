@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 10 module layout for MABS.
+This document explains the Phase 11 module layout for MABS.
 
-Phase 10 keeps the Phase 9.5 module ownership and runtime split, then cleans up the shared private helper layer inside `MABSGameplay`.
+Phase 11 keeps the existing module ownership and runtime split, then adds a public delivery-handler seam inside `MABSGameplay` while preserving state ownership on `UMABSAbilityComponent`.
 
 ## Module map
 
@@ -14,6 +14,7 @@ Owns:
 
 * `UMABSAbilityDefinition`
 * `UMABSAbilitySet`
+* authored delivery-handler class reference on `UMABSAbilityDefinition`
 * ability runtime structs and enums
 * authored timing fields
 * authored socket fields
@@ -34,6 +35,10 @@ Owns:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
+* `FMABSDeliveryExecutionContext`
+* `FMABSDeliveryExecutionResult`
+* `UMABSDeliveryHandler`
+* built-in direct / hit trace / melee / projectile delivery handlers
 * granting runtime
 * activation and combo runtime
 * delivery and targeting runtime
@@ -61,7 +66,7 @@ Owns:
 
 ## `MABSGameplay` internal split
 
-Phase 10 keeps `UMABSAbilityComponent` as the public facade, and the private runtime now lives in:
+Phase 11 keeps `UMABSAbilityComponent` as the public facade, and the private runtime now lives in:
 
 * `MABSAbilityRuntime_EventNames.h`
 * `MABSAbilityRuntime_EventNames.cpp`
@@ -74,14 +79,26 @@ Phase 10 keeps `UMABSAbilityComponent` as the public facade, and the private run
 * `MABSAbilityRuntime_Effects.cpp`
 * `MABSAbilityRuntime_Presentation.cpp`
 * `MABSAbilityRuntime_Debug.cpp`
+* `Private/Delivery/MABSDeliveryHandler.cpp`
+* `Private/Delivery/MABSDirectDeliveryHandler.cpp`
+* `Private/Delivery/MABSHitTraceDeliveryHandler.cpp`
+* `Private/Delivery/MABSMeleeDeliveryHandler.cpp`
+* `Private/Delivery/MABSProjectileDeliveryHandler.cpp`
 
-Phase 10 also keeps single-owner helpers local to their runtime units instead of storing them in one shared helper bucket.
+Phase 11 also adds the public delivery-facing headers:
+
+* `Public/Types/MABSDeliveryHandlerTypes.h`
+* `Public/Delivery/MABSDeliveryHandler.h`
+* `Public/Delivery/MABSDirectDeliveryHandler.h`
+* `Public/Delivery/MABSHitTraceDeliveryHandler.h`
+* `Public/Delivery/MABSMeleeDeliveryHandler.h`
+* `Public/Delivery/MABSProjectileDeliveryHandler.h`
 
 ## Ownership split
 
 Phase 10 intentionally keeps responsibilities like this:
 
-* `MABSGameplay` owns gameplay truth and runtime read models
+* `MABSGameplay` owns gameplay truth, delivery handlers, and runtime read models
 * `MABSDebug` decides how that runtime data is displayed
 
 Inside `MABSGameplay`, helper ownership now follows the same rule:
@@ -90,6 +107,7 @@ Inside `MABSGameplay`, helper ownership now follows the same rule:
 * label and formatting helpers are shared only when multiple runtime units use them
 * debug categorization stays in debug ownership
 * delivery trace/query helpers stay in delivery ownership
+* built-in delivery handler implementations stay in `MABSGameplay`
 * presentation cue/tracer helpers stay in presentation ownership
 
 That means `UMABSAbilityComponent` still exposes compact query helpers such as:

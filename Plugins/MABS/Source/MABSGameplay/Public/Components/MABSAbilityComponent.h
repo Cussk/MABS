@@ -9,6 +9,7 @@
 #include "GameplayTagContainer.h"
 #include "TimerManager.h"
 #include "Types/MABSAbilityTypes.h"
+#include "Types/MABSDeliveryHandlerTypes.h"
 #include "Types/MABSPresentationTypes.h"
 #include "MABSAbilityComponent.generated.h"
 
@@ -22,6 +23,10 @@ class USceneComponent;
 class USkeletalMeshComponent;
 class USoundBase;
 class UMABSAbilityDefinition;
+class UMABSDirectDeliveryHandler;
+class UMABSHitTraceDeliveryHandler;
+class UMABSMeleeDeliveryHandler;
+class UMABSProjectileDeliveryHandler;
 class UMABSAbilitySet;
 class IRepChangedPropertyTracker;
 struct FHitResult;
@@ -152,6 +157,10 @@ protected:
 private:
 
 	friend class AMABSProjectileBase;
+	friend class UMABSDirectDeliveryHandler;
+	friend class UMABSHitTraceDeliveryHandler;
+	friend class UMABSMeleeDeliveryHandler;
+	friend class UMABSProjectileDeliveryHandler;
 
 	UFUNCTION(Server, Reliable)
 	void ServerTryActivateAbilityByTag(FGameplayTag AbilityTag);
@@ -213,11 +222,17 @@ private:
 
 	FMABSResolvedAbilityTarget ExecuteMeleeDelivery(const FMABSAbilitySpec& AbilitySpec, FString& OutDebugMessage, bool bNotifyOwningClient);
 
-	EMABSAbilityActivationResult ExecuteProjectileDelivery(FMABSAbilitySpec& AbilitySpec, bool bNotifyOwningClient);
+	FMABSDeliveryExecutionContext BuildDeliveryExecutionContext(
+		const FMABSAbilitySpec& AbilitySpec,
+		bool bNotifyOwningClient) const;
 
-	EMABSAbilityActivationResult CompleteResolvedTargetAbility(
+	UClass* ResolveDeliveryHandlerClass(
+		const UMABSAbilityDefinition* AbilityDefinition,
+		FString& OutDebugMessage) const;
+
+	EMABSAbilityActivationResult CompleteDeliveryExecutionResult(
 		FMABSAbilitySpec& AbilitySpec,
-		const FMABSResolvedAbilityTarget& ResolvedTarget,
+		const FMABSDeliveryExecutionResult& DeliveryResult,
 		EMABSDeliveryMode DeliveryMode,
 		bool bNotifyOwningClient);
 

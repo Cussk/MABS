@@ -4,9 +4,13 @@
 
 `Melee` is the short-range sweep delivery mode in MABS.
 
+In Phase 11, the built-in melee behavior now lives in `UMABSMeleeDeliveryHandler`.
+
 ## Why it exists
 
 Many combat abilities need a sword arc or short-range strike path that resolves on authority without a projectile.
+
+Phase 11 also gives melee the same extension story that projectiles already had.
 
 ## Authored fields
 
@@ -14,6 +18,7 @@ Use:
 
 * `TargetType = Actor`
 * `DeliveryMode = Melee`
+* optional `DeliveryHandlerClass`
 * `MeleeRange`
 * `MeleeRadius`
 * `MeleeForwardOffset`
@@ -23,31 +28,36 @@ Use:
 
 ## Runtime behavior
 
-On authority, MABS:
+On authority, the built-in melee handler:
 
 1. enters delivery at the authored delivery time
 2. triggers delivery presentation at the melee origin
-3. uses the authored melee socket or fallback origin as the sweep start location
-4. uses the owning actor's current facing as the sweep direction
-5. validates the first resolved actor
-6. applies the authored instant effect
-7. triggers impact presentation on successful effect application
-8. spends cost and starts cooldown on successful commit
+3. uses the authored melee socket or fallback origin
+4. sweeps forward using the owner-facing direction
+5. resolves the primary hit actor
+6. expands to AoE targets when authored
+7. returns the final target set to the normal MABS effect / presentation / commit flow
 
-## Debug events
+Melee whiffs still commit into recovery so combo windows and queued follow-ups behave the same way they did before Phase 11.
 
-Use:
+## How to extend it
 
-* `DeliveryPresentationTriggered`
-* `MeleeHit`
-* `MeleeRejected`
-* `ImpactPresentationTriggered`
+Create a class deriving from `UMABSMeleeDeliveryHandler` when one ability needs custom close-range delivery behavior.
+
+Good uses:
+
+* stagger or launch logic
+* pull or suction effects
+* extra target prioritization
+* melee-specific filtering
+
+Blueprint subclasses can override `ModifyDeliveryResult(...)` and keep the normal built-in sweep logic.
 
 ## Example
 
-Example sword slash:
+Example launcher strike:
 
-* `MeleeOriginSocketName = weapon_tip`
-* `StartupPresentation.Cue.SFX = Sword_Windup`
-* `DeliveryPresentation.Cue.SFX = Sword_Swing`
-* `ImpactPresentation.Cue.VFX = P_SwordImpact`
+* `DeliveryMode = Melee`
+* `DeliveryHandlerClass = BP_LauncherStrikeHandler`
+* built-in melee still resolves the hit
+* the Blueprint handler adds launch movement to the resolved targets

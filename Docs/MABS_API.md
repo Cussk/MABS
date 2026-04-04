@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document lists the current Phase 10 public surface for MABS.
+This document lists the current Phase 11 public surface for MABS.
 
-Phase 10 keeps the public API stable while decomposing the private helper layer behind the existing runtime units.
+Phase 11 keeps the existing activation, effect, and debug API stable while adding a public delivery-handler seam for custom hit trace, melee, direct, and projectile behavior.
 
 ## Module ownership
 
@@ -43,10 +43,17 @@ Owns shared authored data, runtime types, and shared debug read models:
 
 ### `MABSGameplay`
 
-Owns gameplay execution and debug query accessors:
+Owns gameplay execution, delivery handlers, and debug query accessors:
 
 * `UMABSAbilityComponent`
 * `AMABSProjectileBase`
+* `FMABSDeliveryExecutionContext`
+* `FMABSDeliveryExecutionResult`
+* `UMABSDeliveryHandler`
+* `UMABSDirectDeliveryHandler`
+* `UMABSHitTraceDeliveryHandler`
+* `UMABSMeleeDeliveryHandler`
+* `UMABSProjectileDeliveryHandler`
 * `IMABSInstantEffectReceiver`
 * `IMABSCostReceiver`
 
@@ -65,6 +72,7 @@ Owns authored per-ability fields such as:
 
 * `AbilityTag`
 * `DeliveryMode`
+* `DeliveryHandlerClass`
 * `TargetType`
 * timing fields
 * presentation groups
@@ -81,6 +89,25 @@ Owns grouped grant authoring through:
 `UMABSAbilitySet` does not store runtime grant state. It is still only a grouped authoring asset.
 
 ## Important runtime and debug read-model types
+
+### Delivery handler types
+
+`FMABSDeliveryExecutionContext` exposes the execution-side view that custom handlers use, including:
+
+* owning `UMABSAbilityComponent`
+* copied `FMABSAbilitySpec`
+* owning actor / instigator access
+* delivery mode
+* source transform and current trace viewpoint data when available
+
+`FMABSDeliveryExecutionResult` exposes the handler result that the runtime consumes, including:
+
+* delivery success or failure
+* failure result and debug message
+* resolved target actors
+* primary target / hit data
+* impact location and normal
+* whether standard effects and impact presentation should continue
 
 ### `FMABSAbilitySpec`
 
@@ -188,7 +215,7 @@ The runtime harness HUD exposes:
 * periodic summaries
 * category labels and colors
 
-## Phase 10 implementation note
+## Phase 11 implementation note
 
 The public API above is still owned by `UMABSAbilityComponent`.
 
@@ -197,14 +224,9 @@ Internally, the implementation still lives in real runtime units for:
 * core state and replication
 * granting
 * activation and combo flow
-* delivery and targeting
+* delivery handler resolution, execution, and targeting
 * effects, periodic runtime, cost, and cooldown
 * debug read-model assembly
 * presentation routing
 
-Phase 10 adds two private shared helper files:
-
-* `MABSAbilityRuntime_EventNames.*` for shared runtime event identifiers
-* `MABSAbilityRuntime_Common.*` for labels and formatting helpers reused across multiple runtime units
-
-Helpers that only support one runtime concern now stay in that runtime unit instead of a shared private bucket.
+Phase 11 adds public delivery handler headers plus private built-in handler implementations, while `MABSAbilityRuntime_Delivery.cpp` becomes the orchestrator that resolves a handler, runs it, and then continues the normal effect, presentation, cooldown, cost, and recovery flow.

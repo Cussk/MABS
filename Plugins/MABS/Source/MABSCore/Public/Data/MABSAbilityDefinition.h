@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "UObject/SoftObjectPath.h"
 #include "Types/MABSPresentationTypes.h"
 #include "Types/MABSAbilityTypes.h"
 #include "MABSAbilityDefinition.generated.h"
@@ -30,6 +31,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	EMABSDeliveryMode DeliveryMode = EMABSDeliveryMode::Direct;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability", meta=(MetaClass="/Script/MABSGameplay.MABSDeliveryHandler"))
+	FSoftClassPath DeliveryHandlerClass;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ability")
 	EMABSTargetType TargetType = EMABSTargetType::Self;

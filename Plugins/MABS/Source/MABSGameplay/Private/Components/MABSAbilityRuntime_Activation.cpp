@@ -1,4 +1,35 @@
-#include "Components/MABSAbilityRuntime_Internal.h"
+#include "Components/MABSAbilityComponent.h"
+#include "Components/MABSAbilityRuntime_Common.h"
+#include "Components/MABSAbilityRuntime_EventNames.h"
+
+#include "Actors/MABSProjectileBase.h"
+#include "Data/MABSAbilityDefinition.h"
+#include "Engine/World.h"
+#include "Interfaces/MABSCostReceiver.h"
+
+namespace
+{
+	FName GetActivationFailureEventName(const EMABSAbilityActivationResult ActivationResult)
+	{
+		switch (ActivationResult)
+		{
+		case EMABSAbilityActivationResult::ComboRejected:
+			return MABSAbilityComponentEventNames::ComboRejected;
+
+		case EMABSAbilityActivationResult::OnCooldown:
+			return MABSAbilityComponentEventNames::CooldownRejected;
+
+		case EMABSAbilityActivationResult::InsufficientResources:
+			return MABSAbilityComponentEventNames::CostRejected;
+
+		case EMABSAbilityActivationResult::DeliveryFailed:
+			return MABSAbilityComponentEventNames::DeliveryFailed;
+
+		default:
+			return MABSAbilityComponentEventNames::RequestRejected;
+		}
+	}
+}
 
 using namespace MABSAbilityRuntimeInternal;
 

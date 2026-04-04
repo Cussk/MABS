@@ -1,4 +1,118 @@
-#include "Components/MABSAbilityRuntime_Internal.h"
+#include "Components/MABSAbilityComponent.h"
+#include "Components/MABSAbilityRuntime_Common.h"
+#include "Components/MABSAbilityRuntime_EventNames.h"
+
+#include "Data/MABSAbilityDefinition.h"
+#include "Debug/MABSAbilitySystemLogs.h"
+#include "Engine/World.h"
+
+namespace
+{
+	EMABSDebugEventCategory GetDebugEventCategory(const FName EventName)
+	{
+		if (EventName == MABSAbilityComponentEventNames::AbilityGranted
+			|| EventName == MABSAbilityComponentEventNames::AbilityGrantRejected
+			|| EventName == MABSAbilityComponentEventNames::AbilitySetGranted
+			|| EventName == MABSAbilityComponentEventNames::AbilitySetGrantFailed
+			|| EventName == MABSAbilityComponentEventNames::AbilitySetGrantSkipped)
+		{
+			return EMABSDebugEventCategory::General;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::RequestStarted
+			|| EventName == MABSAbilityComponentEventNames::RequestAccepted
+			|| EventName == MABSAbilityComponentEventNames::RequestRejected
+			|| EventName == MABSAbilityComponentEventNames::RequestSentToServer
+			|| EventName == MABSAbilityComponentEventNames::StartupStarted
+			|| EventName == MABSAbilityComponentEventNames::AbilityBlocked
+			|| EventName == MABSAbilityComponentEventNames::AbilityUnblocked)
+		{
+			return EMABSDebugEventCategory::Activation;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::TargetTraceStarted
+			|| EventName == MABSAbilityComponentEventNames::TargetTraceHit
+			|| EventName == MABSAbilityComponentEventNames::TargetTraceRejected
+			|| EventName == MABSAbilityComponentEventNames::TargetResolved
+			|| EventName == MABSAbilityComponentEventNames::TargetResolutionFailed
+			|| EventName == MABSAbilityComponentEventNames::SocketResolved
+			|| EventName == MABSAbilityComponentEventNames::SocketFallbackUsed)
+		{
+			return EMABSDebugEventCategory::Targeting;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::DeliveryScheduled
+			|| EventName == MABSAbilityComponentEventNames::DeliveryTriggered
+			|| EventName == MABSAbilityComponentEventNames::DeliveryStarted
+			|| EventName == MABSAbilityComponentEventNames::DeliveryFailed
+			|| EventName == MABSAbilityComponentEventNames::HitTraceHit
+			|| EventName == MABSAbilityComponentEventNames::HitTraceRejected
+			|| EventName == MABSAbilityComponentEventNames::MeleeHit
+			|| EventName == MABSAbilityComponentEventNames::MeleeRejected
+			|| EventName == MABSAbilityComponentEventNames::ProjectileSpawned
+			|| EventName == MABSAbilityComponentEventNames::ProjectileSpawnFailed
+			|| EventName == MABSAbilityComponentEventNames::ProjectileImpact
+			|| EventName == MABSAbilityComponentEventNames::ProjectileImpactRejected
+			|| EventName == MABSAbilityComponentEventNames::AoEResolved
+			|| EventName == MABSAbilityComponentEventNames::AoETargetRejected
+			|| EventName == MABSAbilityComponentEventNames::EffectApplied
+			|| EventName == MABSAbilityComponentEventNames::EffectApplicationFailed
+			|| EventName == MABSAbilityComponentEventNames::CommitSucceeded
+			|| EventName == MABSAbilityComponentEventNames::RecoveryStarted
+			|| EventName == MABSAbilityComponentEventNames::RecoveryCompleted)
+		{
+			return EMABSDebugEventCategory::Delivery;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::CooldownRejected
+			|| EventName == MABSAbilityComponentEventNames::CooldownStarted
+			|| EventName == MABSAbilityComponentEventNames::CostRejected
+			|| EventName == MABSAbilityComponentEventNames::CostSpent
+			|| EventName == MABSAbilityComponentEventNames::CostValidated)
+		{
+			return EMABSDebugEventCategory::CostCooldown;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::ComboQueued
+			|| EventName == MABSAbilityComponentEventNames::ComboRejected
+			|| EventName == MABSAbilityComponentEventNames::ComboWindowStarted
+			|| EventName == MABSAbilityComponentEventNames::ComboWindowEnded)
+		{
+			return EMABSDebugEventCategory::Combo;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::PeriodicEffectApplied
+			|| EventName == MABSAbilityComponentEventNames::PeriodicEffectRefreshed
+			|| EventName == MABSAbilityComponentEventNames::PeriodicEffectTick
+			|| EventName == MABSAbilityComponentEventNames::PeriodicEffectExpired)
+		{
+			return EMABSDebugEventCategory::Periodic;
+		}
+
+		if (EventName == MABSAbilityComponentEventNames::MontagePlayRequested
+			|| EventName == MABSAbilityComponentEventNames::MontagePlayFailed
+			|| EventName == MABSAbilityComponentEventNames::PresentationAssetMissing
+			|| EventName == MABSAbilityComponentEventNames::PresentationCuePolicyFallbackUsed
+			|| EventName == MABSAbilityComponentEventNames::PresentationCueRealized
+			|| EventName == MABSAbilityComponentEventNames::PresentationCueRouted
+			|| EventName == MABSAbilityComponentEventNames::PresentationCueSkipped
+			|| EventName == MABSAbilityComponentEventNames::PresentationSocketFallbackUsed
+			|| EventName == MABSAbilityComponentEventNames::ProjectileTravelPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::StartupPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::DeliveryPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::ImpactPresentationTriggered
+			|| EventName == MABSAbilityComponentEventNames::TracerCueRealized
+			|| EventName == MABSAbilityComponentEventNames::TracerCueRouted
+			|| EventName == MABSAbilityComponentEventNames::TracerCueSkipped
+			|| EventName == MABSAbilityComponentEventNames::TracerSpawned
+			|| EventName == MABSAbilityComponentEventNames::TracerSpawnFailed)
+		{
+			return EMABSDebugEventCategory::Presentation;
+		}
+
+		return EMABSDebugEventCategory::General;
+	}
+}
 
 using namespace MABSAbilityRuntimeInternal;
 

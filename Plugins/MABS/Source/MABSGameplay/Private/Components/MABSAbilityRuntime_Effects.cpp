@@ -1,4 +1,13 @@
-#include "Components/MABSAbilityRuntime_Internal.h"
+#include "Components/MABSAbilityComponent.h"
+#include "Components/MABSAbilityRuntime_Common.h"
+#include "Components/MABSAbilityRuntime_EventNames.h"
+
+#include "Data/MABSAbilityDefinition.h"
+#include "Engine/World.h"
+#include "GameFramework/DamageType.h"
+#include "Interfaces/MABSCostReceiver.h"
+#include "Interfaces/MABSInstantEffectReceiver.h"
+#include "Kismet/GameplayStatics.h"
 
 using namespace MABSAbilityRuntimeInternal;
 

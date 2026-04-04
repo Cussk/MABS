@@ -1,4 +1,49 @@
-#include "Components/MABSAbilityRuntime_Internal.h"
+#include "Components/MABSAbilityComponent.h"
+#include "Components/MABSAbilityRuntime_Common.h"
+#include "Components/MABSAbilityRuntime_EventNames.h"
+
+#include "Actors/MABSProjectileBase.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+#include "Data/MABSAbilityDefinition.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/OverlapResult.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
+#include "Interfaces/MABSInstantEffectReceiver.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundBase.h"
+
+namespace
+{
+	EMABSTargetTraceMode GetTraceModeForRadius(const float TraceRadius)
+	{
+		return TraceRadius > 0.0f ? EMABSTargetTraceMode::Sphere : EMABSTargetTraceMode::Line;
+	}
+
+	FCollisionObjectQueryParams MakeTargetTraceObjectQueryParams(const bool bIgnoreNonTargetWorldHits)
+	{
+		FCollisionObjectQueryParams ObjectQueryParams;
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_Pawn);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_Vehicle);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_Destructible);
+
+		if (!bIgnoreNonTargetWorldHits)
+		{
+			ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		}
+
+		return ObjectQueryParams;
+	}
+}
 
 using namespace MABSAbilityRuntimeInternal;
 
@@ -454,8 +499,8 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 				TEXT("Routed ProjectileTravel cue with policy %s through the replicated projectile '%s'. Assets: VFX=%s, SFX=%s."),
 				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
 				*GetNameSafe(Projectile),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX)));
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX.Get()),
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX.Get())));
 		if (bNotifyOwningClient)
 		{
 			EmitDebugEventToOwningClient(CueRoutedEvent);
@@ -471,8 +516,8 @@ EMABSAbilityActivationResult UMABSAbilityComponent::ExecuteProjectileDelivery(
 				TEXT("Hooked projectile travel cue for projectile '%s' with policy %s. Assets: VFX=%s, SFX=%s."),
 				*GetNameSafe(Projectile),
 				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX),
-				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX)));
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX.Get()),
+				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX.Get())));
 		if (bNotifyOwningClient)
 		{
 			EmitDebugEventToOwningClient(TravelPresentationEvent);

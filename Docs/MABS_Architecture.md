@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 9.5 runtime architecture for MABS after the true de-monolith pass.
+This document explains the Phase 10 runtime architecture for MABS after the helper ownership cleanup pass.
 
-The goal is to keep runtime behavior stable while giving each major runtime concern a clearer internal home.
+The goal is still to keep runtime behavior stable while giving each major runtime concern a clearer internal home, but Phase 10 now applies that ownership rule to private helper code as well.
 
 ## Module map
 
@@ -62,11 +62,13 @@ It does not own harness rendering or formatting rules, and it no longer relies o
 
 ## Internal runtime structure
 
-Phase 9.5 replaces the old fragment split with real private implementation units:
+Phase 10 keeps the Phase 9.5 runtime split, then decomposes the shared helper layer into smaller ownership slices:
 
 * `MABSAbilityComponent.cpp`
-* `MABSAbilityRuntime_Internal.h`
-* `MABSAbilityRuntime_Internal.cpp`
+* `MABSAbilityRuntime_EventNames.h`
+* `MABSAbilityRuntime_EventNames.cpp`
+* `MABSAbilityRuntime_Common.h`
+* `MABSAbilityRuntime_Common.cpp`
 * `MABSAbilityRuntime_Core.cpp`
 * `MABSAbilityRuntime_Granting.cpp`
 * `MABSAbilityRuntime_Activation.cpp`
@@ -75,7 +77,21 @@ Phase 9.5 replaces the old fragment split with real private implementation units
 * `MABSAbilityRuntime_Presentation.cpp`
 * `MABSAbilityRuntime_Debug.cpp`
 
-That structure keeps the public component stable while making future runtime work easier to place.
+That structure keeps the public component stable while avoiding a new private umbrella file.
+
+## Private helper ownership
+
+Phase 10 keeps only truly shared helpers in shared private files:
+
+* event-name constants live in `MABSAbilityRuntime_EventNames.*`
+* shared labels and debug formatting helpers live in `MABSAbilityRuntime_Common.*`
+
+Helpers that only support one runtime concern now live with that concern:
+
+* activation-only failure event mapping lives in `MABSAbilityRuntime_Activation.cpp`
+* delivery trace/query helpers live in `MABSAbilityRuntime_Delivery.cpp`
+* presentation cue/tracer asset descriptions and Niagara tracer parameter names live in `MABSAbilityRuntime_Presentation.cpp`
+* debug event category mapping lives in `MABSAbilityRuntime_Debug.cpp`
 
 ## Runtime concern boundaries
 
@@ -164,6 +180,8 @@ Primary transient runtime state:
 * reusable cue and tracer Niagara pools
 
 That means the new runtime units separate behavior ownership, not state ownership.
+
+Phase 10 keeps that rule intact. The helper cleanup does not move authoritative or replicated gameplay state off `UMABSAbilityComponent`.
 
 ## Runtime flow
 

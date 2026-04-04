@@ -1,4 +1,9 @@
-#include "Components/MABSAbilityRuntime_Internal.h"
+#include "Components/MABSAbilityComponent.h"
+#include "Components/MABSAbilityRuntime_Common.h"
+#include "Components/MABSAbilityRuntime_EventNames.h"
+
+#include "Data/MABSAbilityDefinition.h"
+#include "Data/MABSAbilitySet.h"
 
 using namespace MABSAbilityRuntimeInternal;
 

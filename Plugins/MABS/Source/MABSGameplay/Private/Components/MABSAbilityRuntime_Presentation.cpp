@@ -1,4 +1,96 @@
-#include "Components/MABSAbilityRuntime_Internal.h"
+#include "Components/MABSAbilityComponent.h"
+#include "Components/MABSAbilityRuntime_Common.h"
+#include "Components/MABSAbilityRuntime_EventNames.h"
+
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+#include "Data/MABSAbilityDefinition.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+
+namespace
+{
+	FString DescribeCueAssets(const FMABSPresentationCueData& CueData)
+	{
+		TArray<FString> AssetLabels;
+		if (CueData.VFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(CueData.VFX)));
+		}
+		if (CueData.SFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(CueData.SFX)));
+		}
+		if (CueData.CameraShake.HasCameraShake())
+		{
+			AssetLabels.Add(FString::Printf(TEXT("CameraShake=%s"), *GetNameSafe(CueData.CameraShake.CameraShakeClass)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no presentation assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+
+	FString DescribeCueEventAssets(const FMABSPresentationCueEvent& CueEvent)
+	{
+		TArray<FString> AssetLabels;
+		if (CueEvent.VFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(CueEvent.VFX)));
+		}
+		if (CueEvent.SFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(CueEvent.SFX)));
+		}
+		if (CueEvent.CameraShakeClass != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("CameraShake=%s"), *GetNameSafe(CueEvent.CameraShakeClass)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no presentation assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+
+	FString DescribeTracerAssets(const FMABSHitTraceTracerPresentationData& TracerData)
+	{
+		TArray<FString> AssetLabels;
+		if (TracerData.TracerVFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(TracerData.TracerVFX)));
+		}
+		if (TracerData.TracerSFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(TracerData.TracerSFX)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no tracer assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+
+	FString DescribeTracerCueAssets(const FMABSTracerCueEvent& TracerEvent)
+	{
+		TArray<FString> AssetLabels;
+		if (TracerEvent.VFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("VFX=%s"), *GetNameSafe(TracerEvent.VFX)));
+		}
+		if (TracerEvent.SFX != nullptr)
+		{
+			AssetLabels.Add(FString::Printf(TEXT("SFX=%s"), *GetNameSafe(TracerEvent.SFX)));
+		}
+
+		return AssetLabels.IsEmpty() ? TEXT("no tracer assets") : FString::Join(AssetLabels, TEXT(", "));
+	}
+
+	const FName NiagaraTracerTraceStartParameter(TEXT("User.MABS_TraceStart"));
+	const FName NiagaraTracerTraceEndParameter(TEXT("User.MABS_TraceEnd"));
+	const FName NiagaraTracerImpactPointParameter(TEXT("User.MABS_ImpactPoint"));
+}
 
 using namespace MABSAbilityRuntimeInternal;
 

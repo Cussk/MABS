@@ -4,7 +4,7 @@
 
 MABS is a plugin-first, multiplayer-ready, data-driven ability framework for Unreal Engine.
 
-As of Phase 9.5, the runtime path supports:
+As of Phase 10, the runtime path supports:
 
 * granting authored abilities
 * grouped granting through authored ability sets
@@ -70,8 +70,8 @@ MABS provides that foundation without pulling in a larger framework.
 9. Call `TryActivateAbilityByTag`.
 10. Optionally set the HUD class to `AMABSDebugHUD` and enable `mabs.DebugHarness 1` for runtime inspection.
 
-## Phase 9.5 cleanup note
+## Phase 10 cleanup note
 
-Phase 9.5 does not change the normal setup path.
+Phase 10 does not change the normal setup path.
 
-It changes the internal runtime organization so `UMABSAbilityComponent` stays the public authority surface while true runtime concern boundaries now live in private `.cpp` units instead of included fragments.
+It keeps the Phase 9.5 runtime concern split, then cleans up the private helper layer so shared event names and formatting helpers are separated from debug-only, delivery-only, and presentation-only helper logic.

@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document lists the current Phase 9.5 public surface for MABS.
+This document lists the current Phase 10 public surface for MABS.
 
-Phase 9.5 keeps the public API stable while replacing the old internal `.inl` split with real runtime implementation units.
+Phase 10 keeps the public API stable while decomposing the private helper layer behind the existing runtime units.
 
 ## Module ownership
 
@@ -188,11 +188,11 @@ The runtime harness HUD exposes:
 * periodic summaries
 * category labels and colors
 
-## Phase 9.5 implementation note
+## Phase 10 implementation note
 
 The public API above is still owned by `UMABSAbilityComponent`.
 
-Internally, the implementation now lives in real runtime units for:
+Internally, the implementation still lives in real runtime units for:
 
 * core state and replication
 * granting
@@ -201,3 +201,10 @@ Internally, the implementation now lives in real runtime units for:
 * effects, periodic runtime, cost, and cooldown
 * debug read-model assembly
 * presentation routing
+
+Phase 10 adds two private shared helper files:
+
+* `MABSAbilityRuntime_EventNames.*` for shared runtime event identifiers
+* `MABSAbilityRuntime_Common.*` for labels and formatting helpers reused across multiple runtime units
+
+Helpers that only support one runtime concern now stay in that runtime unit instead of a shared private bucket.

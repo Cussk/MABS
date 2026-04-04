@@ -2,13 +2,13 @@
 
 ## What it is
 
-This document explains the Phase 9.5 runtime debugging model for MABS.
+This document explains the Phase 10 runtime debugging model for MABS.
 
-Phase 9.5 keeps the full runtime harness, but the gameplay-side debug work now lives in a dedicated debug runtime unit instead of being mixed through the old component split.
+Phase 10 keeps the full runtime harness and the same user-facing debug behavior, but the gameplay-side category mapping now lives directly with the debug runtime instead of a generic shared helper file.
 
 ## Why it exists
 
-By Phase 9.5, MABS already has enough runtime breadth that raw logs alone are not enough.
+By Phase 10, MABS already has enough runtime breadth that raw logs alone are not enough.
 
 Users need to inspect:
 
@@ -22,7 +22,7 @@ Users need to inspect:
 
 ## What is available
 
-Phase 9.5 debugging includes:
+Phase 10 debugging includes:
 
 * structured `FMABSAbilityDebugEvent` output with `Category`
 * the latest `FMABSTargetTraceDebugInfo` snapshot
@@ -42,7 +42,7 @@ Phase 9.5 debugging includes:
 
 ## Event categories
 
-Phase 9.5 keeps the existing event system, and each event carries a lightweight category:
+Phase 10 keeps the existing event system, and each event carries a lightweight category:
 
 * `General`
 * `Activation`
@@ -112,6 +112,8 @@ The debug runtime in `MABSGameplay` owns:
 * category mapping
 * summary assembly
 * target-trace snapshot bookkeeping
+
+Phase 10 keeps that ownership local to `MABSAbilityRuntime_Debug.cpp` instead of sharing category mapping through a generic helper layer.
 
 `MABSDebug` owns:
 

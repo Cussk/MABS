@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 9.5 module layout for MABS.
+This document explains the Phase 10 module layout for MABS.
 
-Phase 9.5 keeps the module ownership from earlier phases, but replaces the old `.inl`-based component decomposition with real private runtime implementation units inside `MABSGameplay`.
+Phase 10 keeps the Phase 9.5 module ownership and runtime split, then cleans up the shared private helper layer inside `MABSGameplay`.
 
 ## Module map
 
@@ -61,10 +61,12 @@ Owns:
 
 ## `MABSGameplay` internal split
 
-Phase 9.5 keeps `UMABSAbilityComponent` as the public facade, but the private runtime now lives in:
+Phase 10 keeps `UMABSAbilityComponent` as the public facade, and the private runtime now lives in:
 
-* `MABSAbilityRuntime_Internal.h`
-* `MABSAbilityRuntime_Internal.cpp`
+* `MABSAbilityRuntime_EventNames.h`
+* `MABSAbilityRuntime_EventNames.cpp`
+* `MABSAbilityRuntime_Common.h`
+* `MABSAbilityRuntime_Common.cpp`
 * `MABSAbilityRuntime_Core.cpp`
 * `MABSAbilityRuntime_Granting.cpp`
 * `MABSAbilityRuntime_Activation.cpp`
@@ -73,14 +75,22 @@ Phase 9.5 keeps `UMABSAbilityComponent` as the public facade, but the private ru
 * `MABSAbilityRuntime_Presentation.cpp`
 * `MABSAbilityRuntime_Debug.cpp`
 
-That is now the primary refactor story, not a large component source file with included fragments.
+Phase 10 also keeps single-owner helpers local to their runtime units instead of storing them in one shared helper bucket.
 
 ## Ownership split
 
-Phase 9.5 intentionally keeps responsibilities like this:
+Phase 10 intentionally keeps responsibilities like this:
 
 * `MABSGameplay` owns gameplay truth and runtime read models
 * `MABSDebug` decides how that runtime data is displayed
+
+Inside `MABSGameplay`, helper ownership now follows the same rule:
+
+* event-name constants are shared private runtime data
+* label and formatting helpers are shared only when multiple runtime units use them
+* debug categorization stays in debug ownership
+* delivery trace/query helpers stay in delivery ownership
+* presentation cue/tracer helpers stay in presentation ownership
 
 That means `UMABSAbilityComponent` still exposes compact query helpers such as:
 

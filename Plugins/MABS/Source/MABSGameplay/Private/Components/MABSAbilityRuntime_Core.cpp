@@ -1,6 +1,6 @@
-#include "Components/MABSAbilityRuntime_Internal.h"
+#include "Components/MABSAbilityComponent.h"
 
-using namespace MABSAbilityRuntimeInternal;
+#include "Net/UnrealNetwork.h"
 
 void UMABSAbilityComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {

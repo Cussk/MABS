@@ -2,7 +2,7 @@
 
 ## What it is
 
-This document explains the built-in projectile path in MABS after the Phase 11 delivery-handler pass.
+This document explains the built-in projectile path in MABS after the Phase 12 validation pass on top of the Phase 11 delivery-handler work.
 
 ## Why it exists
 
@@ -40,6 +40,8 @@ Use:
 
 `ProjectileActorClass` must derive from `AMABSProjectileBase`.
 
+Phase 12 also requires `ProjectileActorClass` to be non-abstract.
+
 ## Runtime behavior
 
 Projectile abilities still work the same way for gameplay:
@@ -53,6 +55,17 @@ Phase 11 only changes the spawn side:
 * the delivery runtime now resolves `UMABSProjectileDeliveryHandler`
 * the built-in projectile handler performs the authoritative spawn
 * impact still routes through `AMABSProjectileBase`
+
+## Validation
+
+Phase 12 validates the common projectile authoring mistakes:
+
+* `TargetType` must be `Actor`
+* `ProjectileActorClass` must be set
+* `ProjectileActorClass` must derive from `AMABSProjectileBase`
+* `ProjectileActorClass` must not be abstract
+* if a custom handler class is set, it must be loadable, non-abstract, and derive from `UMABSDeliveryHandler`
+* a handler derived from a different built-in mode-specific base is rejected as incompatible authoring
 
 ## How to extend it
 

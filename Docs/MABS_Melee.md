@@ -40,6 +40,16 @@ On authority, the built-in melee handler:
 
 Melee whiffs still commit into recovery so combo windows and queued follow-ups behave the same way they did before Phase 11.
 
+## Validation
+
+Phase 12 validates the common melee authoring mistakes:
+
+* `TargetType` must be `Actor`
+* `MeleeRange` must be greater than zero
+* `MeleeRadius` must be greater than zero
+* if a custom handler class is set, it must be loadable, non-abstract, and derive from `UMABSDeliveryHandler`
+* a handler derived from a different built-in mode-specific base is rejected as incompatible authoring
+
 ## How to extend it
 
 Create a class deriving from `UMABSMeleeDeliveryHandler` when one ability needs custom close-range delivery behavior.

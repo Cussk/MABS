@@ -399,6 +399,42 @@ UClass* UMABSAbilityComponent::ResolveDeliveryHandlerClass(
 			return nullptr;
 		}
 
+		struct FDeliveryHandlerModeRule
+		{
+			EMABSDeliveryMode DeliveryMode;
+			UClass* HandlerBaseClass;
+			const TCHAR* HandlerBaseName;
+		};
+
+		const FDeliveryHandlerModeRule HandlerModeRules[] =
+		{
+			{EMABSDeliveryMode::Direct, UMABSDirectDeliveryHandler::StaticClass(), TEXT("UMABSDirectDeliveryHandler")},
+			{EMABSDeliveryMode::HitTrace, UMABSHitTraceDeliveryHandler::StaticClass(), TEXT("UMABSHitTraceDeliveryHandler")},
+			{EMABSDeliveryMode::Melee, UMABSMeleeDeliveryHandler::StaticClass(), TEXT("UMABSMeleeDeliveryHandler")},
+			{EMABSDeliveryMode::Projectile, UMABSProjectileDeliveryHandler::StaticClass(), TEXT("UMABSProjectileDeliveryHandler")}
+		};
+
+		for (const FDeliveryHandlerModeRule& HandlerModeRule : HandlerModeRules)
+		{
+			if (!HandlerClass->IsChildOf(HandlerModeRule.HandlerBaseClass))
+			{
+				continue;
+			}
+
+			if (HandlerModeRule.DeliveryMode == AbilityDefinition->DeliveryMode)
+			{
+				break;
+			}
+
+			OutDebugMessage = FString::Printf(
+				TEXT("Delivery handler class '%s' derives from %s but ability '%s' uses %s delivery."),
+				*GetNameSafe(HandlerClass),
+				HandlerModeRule.HandlerBaseName,
+				*GetAbilityLabel(AbilityDefinition),
+				*GetDeliveryModeLabel(AbilityDefinition->DeliveryMode));
+			return nullptr;
+		}
+
 		OutDebugMessage = FString::Printf(
 			TEXT("Resolved authored delivery handler '%s' for ability '%s'."),
 			*GetNameSafe(HandlerClass),

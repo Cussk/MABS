@@ -2,13 +2,13 @@
 
 ## What it is
 
-This document explains the current Phase 11 ability model: authored definitions, optional grouped ability sets, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional delivery handlers, optional montage playback, and presentation.
+This document explains the current Phase 12 ability model: authored definitions, optional grouped ability sets, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional delivery handlers, optional montage playback, presentation, and editor-side authoring validation.
 
 ## Why it exists
 
 MABS stays readable by keeping authored data separate from live runtime state.
 
-Phase 11 keeps the earlier combat model intact and adds one delivery authoring seam: abilities can now optionally point at a custom delivery handler class while the default built-in delivery behavior still works with no authoring change.
+Phase 11 added the delivery-handler seam. Phase 12 keeps that seam and adds validation so invalid delivery and handler authoring gets caught before runtime.
 
 ## Ability definitions
 
@@ -23,6 +23,19 @@ Current authored fields cover:
 * delivery and sockets: `DeliveryMode`, optional `DeliveryHandlerClass`, delivery socket fields, offsets, and optional montage fields
 * presentation: `StartupPresentation`, `DeliveryPresentation`, and `ImpactPresentation`
 * combat breadth: `Combo`, `AoE`, and `PeriodicEffect`
+
+## Authoring validation
+
+Phase 12 adds editor validation for `UMABSAbilityDefinition`.
+
+The validator checks:
+
+* missing or unloadable `DeliveryHandlerClass`
+* handler classes that do not derive from `UMABSDeliveryHandler`
+* abstract handler classes
+* obvious handler/delivery-mode mismatches such as projectile handlers authored on melee abilities
+* common invalid direct / hit trace / melee / projectile field combinations
+* invalid combo, AoE, periodic, and gameplay-effect basics that runtime would otherwise reject later
 
 ## Ability sets
 
@@ -114,9 +127,10 @@ Runtime state answers:
 2. Optionally create a `UMABSAbilitySet`.
 3. Fill `AbilityDefinitions` when several abilities should be granted together.
 4. Leave `DeliveryHandlerClass` empty to use the built-in handler for the authored delivery mode, or assign a custom handler class when one ability needs custom delivery behavior.
-5. Grant either the definition or the set on authority.
-6. Activate abilities with `TryActivateAbilityByTag`.
-7. Inspect `FMABSAbilitySpec`, active periodic effects, and recent debug events.
+5. Run asset validation and fix any invalid delivery or handler errors.
+6. Grant either the definition or the set on authority.
+7. Activate abilities with `TryActivateAbilityByTag`.
+8. Inspect `FMABSAbilitySpec`, active periodic effects, and recent debug events.
 
 ## Example
 

@@ -122,7 +122,7 @@ FMABSDeliveryExecutionResult UMABSProjectileDeliveryHandler::ExecuteDelivery(con
 			EMABSAbilityActivationResult::Success,
 			FString::Printf(
 				TEXT("Routed ProjectileTravel cue with policy %s through the replicated projectile '%s'. Assets: VFX=%s, SFX=%s."),
-				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
+				*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
 				*GetNameSafe(Projectile),
 				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX.Get()),
 				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX.Get())));
@@ -140,7 +140,7 @@ FMABSDeliveryExecutionResult UMABSProjectileDeliveryHandler::ExecuteDelivery(con
 			FString::Printf(
 				TEXT("Hooked projectile travel cue for projectile '%s' with policy %s. Assets: VFX=%s, SFX=%s."),
 				*GetNameSafe(Projectile),
-				*GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
+				*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(AbilityDefinition->DeliveryPresentation.ProjectileTravel.VisibilityPolicy),
 				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelVFX.Get()),
 				*GetNameSafe(AbilityDefinition->DeliveryPresentation.ProjectileTravel.TravelSFX.Get())));
 		if (Context.bNotifyOwningClient)

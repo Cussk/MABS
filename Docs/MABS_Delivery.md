@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document explains the Phase 11 delivery layer in MABS.
+This document explains the Phase 12 delivery layer in MABS.
 
-Phase 11 keeps the same built-in delivery modes, but moves their behavior behind public delivery handler classes so projects can extend delivery in C++ or Blueprint without editing core runtime code.
+Phase 11 moved built-in delivery behavior behind public delivery handler classes. Phase 12 keeps that design and adds validation for invalid handler and delivery authoring.
 
 ## Why it exists
 
@@ -43,6 +43,16 @@ Phase 11 adds one optional authored class reference:
 * `DeliveryHandlerClass`
 
 Leave it empty to use the built-in handler. Set it only when one ability needs custom delivery behavior.
+
+## Phase 12 validation
+
+Phase 12 validates common delivery authoring mistakes before runtime:
+
+* `DeliveryHandlerClass` must load successfully
+* `DeliveryHandlerClass` must derive from `UMABSDeliveryHandler`
+* `DeliveryHandlerClass` must not be abstract
+* obvious handler-mode mismatches such as melee handlers on projectile abilities are rejected
+* built-in delivery requirements such as trace distance, melee range, and `ProjectileActorClass` are validated from the authored `DeliveryMode`
 
 ## Runtime behavior
 
@@ -97,7 +107,8 @@ This phase does not add a separate AoE handler framework.
 2. Leave `DeliveryHandlerClass` empty for default behavior.
 3. Create a C++ or Blueprint subclass of the appropriate built-in delivery handler when one ability needs custom delivery logic.
 4. Assign that handler class to `DeliveryHandlerClass`.
-5. Grant and activate the ability on authority as usual.
+5. Run asset validation and fix any invalid handler or delivery errors.
+6. Grant and activate the ability on authority as usual.
 
 ## Example
 

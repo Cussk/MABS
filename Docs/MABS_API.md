@@ -2,9 +2,9 @@
 
 ## What it is
 
-This document lists the current Phase 11 public surface for MABS.
+This document lists the current Phase 12 public surface for MABS.
 
-Phase 11 keeps the existing activation, effect, and debug API stable while adding a public delivery-handler seam for custom hit trace, melee, direct, and projectile behavior.
+Phase 12 keeps the existing activation, effect, and debug API stable, keeps the Phase 11 delivery-handler seam, and adds an editor validation entry point for authored ability assets.
 
 ## Module ownership
 
@@ -64,6 +64,12 @@ Owns harness UI and formatting:
 * `UMABSDebugBlueprintLibrary`
 * `AMABSDebugHUD`
 
+### `MABSEditor`
+
+Owns editor-only authoring validation:
+
+* `UMABSAbilityDefinitionValidator`
+
 ## Important authored assets
 
 ### `UMABSAbilityDefinition`
@@ -87,6 +93,8 @@ Owns grouped grant authoring through:
 * `AbilityDefinitions`
 
 `UMABSAbilitySet` does not store runtime grant state. It is still only a grouped authoring asset.
+
+Phase 12 also validates `UMABSAbilityDefinition` assets in the editor so invalid delivery or handler authoring is caught before activation.
 
 ## Important runtime and debug read-model types
 

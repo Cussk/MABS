@@ -4,7 +4,7 @@
 
 MABS is a plugin-first, multiplayer-ready, data-driven ability framework for Unreal Engine.
 
-As of Phase 11, the runtime path supports:
+As of Phase 12, the authoring and runtime path supports:
 
 * granting authored abilities
 * grouped granting through authored ability sets
@@ -13,6 +13,7 @@ As of Phase 11, the runtime path supports:
 * timing through startup, delivery, and recovery
 * delivery through `Direct`, `HitTrace`, `Melee`, or `Projectile`
 * custom delivery handlers in C++ or Blueprint for those delivery modes
+* editor validation for invalid delivery-handler and delivery-mode authoring
 * basic melee combo chaining
 * optional AoE target resolution using sphere, box, or capsule shapes
 * instant `Damage` and `Heal` effects
@@ -43,7 +44,7 @@ MABS provides that foundation without pulling in a larger framework.
 * `MABSCore` owns authored data, ability-set data, ability runtime structs, shared debug summary types, and the authored delivery-handler class reference on `UMABSAbilityDefinition`
 * `MABSGameplay` owns granting, activation, delivery, delivery handlers, effects, combo runtime, AoE resolution, periodic timers, cue routing, replication, projectile runtime, and debug summary accessors through real private runtime units behind `UMABSAbilityComponent`
 * `MABSDebug` owns runtime-safe formatting helpers and the runtime harness HUD
-* `MABSEditor` remains the editor-only extension point
+* `MABSEditor` owns editor-only extensions, including `UMABSAbilityDefinition` validation
 
 ## Current ability flow
 
@@ -65,15 +66,20 @@ MABS provides that foundation without pulling in a larger framework.
 3. Optionally create a `UMABSAbilitySet`.
 4. Set target intent, delivery mode, timing, cost, cooldown, and gameplay effect data on each ability.
 5. Leave `DeliveryHandlerClass` empty for normal built-in delivery, or assign a custom delivery handler class when one ability needs custom delivery behavior.
-6. Fill the `Combo`, `AoE`, or `PeriodicEffect` groups only when the ability needs them.
-7. Fill the presentation groups that matter for that delivery mode.
-8. Add `UMABSAbilityComponent` to the owning actor.
-9. Grant the ability or set on authority.
-10. Call `TryActivateAbilityByTag`.
-11. Optionally set the HUD class to `AMABSDebugHUD` and enable `mabs.DebugHarness 1` for runtime inspection.
+6. Run asset validation so invalid handler classes, projectile classes, and delivery-mode setups fail before runtime.
+7. Fill the `Combo`, `AoE`, or `PeriodicEffect` groups only when the ability needs them.
+8. Fill the presentation groups that matter for that delivery mode.
+9. Add `UMABSAbilityComponent` to the owning actor.
+10. Grant the ability or set on authority.
+11. Call `TryActivateAbilityByTag`.
+12. Optionally set the HUD class to `AMABSDebugHUD` and enable `mabs.DebugHarness 1` for runtime inspection.
 
 ## Phase 11 extensibility note
 
 Phase 11 does not change the normal setup path for existing content.
 
 It adds a delivery-handler seam so hit trace, melee, direct, and projectile delivery can be customized in C++ or Blueprint without moving authoritative runtime state off `UMABSAbilityComponent`.
+
+## Phase 12 safety note
+
+Phase 12 keeps that handler seam, but adds editor validation so invalid handler classes and common bad delivery setups are rejected earlier and more clearly.

@@ -343,6 +343,12 @@ EMABSAbilityActivationResult UMABSAbilityComponent::CanActivateAbility(const FMA
 			OutDebugMessage = TEXT("Activation rejected because Projectile delivery requires a class derived from AMABSProjectileBase.");
 			return EMABSAbilityActivationResult::InvalidAbility;
 		}
+
+		if (AbilityDefinition->ProjectileActorClass->HasAnyClassFlags(CLASS_Abstract))
+		{
+			OutDebugMessage = TEXT("Activation rejected because Projectile delivery requires a non-abstract projectile actor class.");
+			return EMABSAbilityActivationResult::InvalidAbility;
+		}
 		break;
 
 	default:

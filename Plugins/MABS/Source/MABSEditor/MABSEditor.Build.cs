@@ -11,6 +11,7 @@ public class MABSEditor : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
+				"DataValidation",
 				"Engine",
 				"UnrealEd",
 				"MABSCore",

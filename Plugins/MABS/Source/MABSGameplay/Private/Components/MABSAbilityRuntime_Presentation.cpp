@@ -824,7 +824,7 @@ bool UMABSAbilityComponent::RoutePresentationCue(
 		FString::Printf(
 			TEXT("Routed %s cue with policy %s at %s. %s Assets: %s."),
 			*GetPresentationCuePhaseLabel(RoutedCueEvent.Phase),
-			*GetPresentationVisibilityPolicyLabel(RoutedCueEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(RoutedCueEvent.VisibilityPolicy),
 			*FormatVectorForDebug(RoutedCueEvent.Location),
 			*ResolutionMessage,
 			*DescribeCueEventAssets(RoutedCueEvent)));
@@ -920,7 +920,7 @@ bool UMABSAbilityComponent::RouteTracerCue(
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
 			TEXT("Routed tracer cue with policy %s from %s to %s. %s Assets: %s."),
-			*GetPresentationVisibilityPolicyLabel(RoutedTracerEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(RoutedTracerEvent.VisibilityPolicy),
 			*FormatVectorForDebug(RoutedTracerEvent.TraceStart),
 			*FormatVectorForDebug(RoutedTracerEvent.TraceEnd),
 			*ResolutionMessage,
@@ -986,7 +986,7 @@ void UMABSAbilityComponent::TriggerStartupPresentation(const FMABSAbilitySpec& A
 		FString::Printf(
 			TEXT("Triggered startup presentation cue for ability '%s' with policy %s at %s using %s. Assets: %s."),
 			*GetAbilityLabel(AbilityDefinition),
-			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
 			*FormatVectorForDebug(CueEvent.Location),
 			*OriginDescription,
 			*DescribeCueAssets(AbilityDefinition->StartupPresentation.Cue)));
@@ -1052,7 +1052,7 @@ void UMABSAbilityComponent::TriggerDeliveryPresentation(
 		FString::Printf(
 			TEXT("Triggered delivery presentation cue for %s with policy %s at %s using %s. Assets: %s."),
 			*GetDeliveryModeLabel(DeliveryMode),
-			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
 			*FormatVectorForDebug(CueEvent.Location),
 			*OriginDescription,
 			*DescribeCueAssets(AbilityDefinition->DeliveryPresentation.Cue)));
@@ -1113,7 +1113,7 @@ void UMABSAbilityComponent::TriggerTracerPresentation(
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
 			TEXT("Spawned tracer cue with policy %s from %s to %s. Assets: %s."),
-			*GetPresentationVisibilityPolicyLabel(TracerEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(TracerEvent.VisibilityPolicy),
 			*FormatVectorForDebug(TraceStart),
 			*FormatVectorForDebug(TraceEnd),
 			*DescribeTracerAssets(AbilityDefinition->DeliveryPresentation.HitTraceTracer)));
@@ -1188,7 +1188,7 @@ void UMABSAbilityComponent::TriggerImpactPresentation(
 			TEXT("Triggered impact presentation cue for %s on '%s' with policy %s at %s. Assets: %s."),
 			*GetDeliveryModeLabel(DeliveryMode),
 			*GetNameSafe(ResolvedTarget.TargetActor),
-			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
 			*FormatVectorForDebug(CueEvent.Location),
 			*DescribeCueAssets(AbilityDefinition->ImpactPresentation.Cue)));
 	if (bNotifyOwningClient)
@@ -1243,7 +1243,7 @@ void UMABSAbilityComponent::TriggerProjectileImpactPresentation(
 		FString::Printf(
 			TEXT("Triggered projectile impact presentation cue on '%s' with policy %s at %s. Assets: %s."),
 			*GetNameSafe(HitActor),
-			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
 			*FormatVectorForDebug(CueEvent.Location),
 			*DescribeCueAssets(AbilityDefinition.ImpactPresentation.Cue)));
 	EmitDebugEventToOwningClient(PresentationEvent);
@@ -1411,7 +1411,7 @@ void UMABSAbilityComponent::PlayPresentationCueLocally(const FMABSPresentationCu
 		FString::Printf(
 			TEXT("Realized %s cue locally with policy %s at %s. Assets: %s."),
 			*GetPresentationCuePhaseLabel(CueEvent.Phase),
-			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
 			*FormatVectorForDebug(CueEvent.Location),
 			*DescribeCueEventAssets(CueEvent)));
 }
@@ -1453,7 +1453,7 @@ void UMABSAbilityComponent::SpawnTracerPresentationLocally(const FMABSTracerCueE
 		EMABSAbilityActivationResult::Success,
 		FString::Printf(
 			TEXT("Realized tracer cue locally with policy %s from %s to %s. Assets: %s."),
-			*GetPresentationVisibilityPolicyLabel(TracerEvent.VisibilityPolicy),
+			*MABSAbilityRuntimeInternal::GetPresentationVisibilityPolicyLabel(TracerEvent.VisibilityPolicy),
 			*FormatVectorForDebug(TracerEvent.TraceStart),
 			*FormatVectorForDebug(TracerEvent.TraceEnd),
 			*DescribeTracerCueAssets(TracerEvent)));

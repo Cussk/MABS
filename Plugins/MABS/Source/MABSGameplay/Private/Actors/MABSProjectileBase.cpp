@@ -14,7 +14,7 @@
 
 namespace
 {
-	FString GetPresentationVisibilityPolicyLabel(const EMABSPresentationCueVisibilityPolicy VisibilityPolicy)
+	FString GetProjectilePresentationVisibilityPolicyLabel(const EMABSPresentationCueVisibilityPolicy VisibilityPolicy)
 	{
 		switch (VisibilityPolicy)
 		{
@@ -285,7 +285,7 @@ bool AMABSProjectileBase::ShouldRealizeTravelCueLocally(
 
 		OutSkipReason = FString::Printf(
 			TEXT("Projectile travel cue with policy %s was skipped because the source actor is not locally controlled on this instance."),
-			*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy));
+			*GetProjectilePresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy));
 		return false;
 
 	case EMABSPresentationCueVisibilityPolicy::RelevantClients:
@@ -407,7 +407,7 @@ void AMABSProjectileBase::ActivateTravelPresentation()
 			EMABSAbilityActivationResult::Success,
 			FString::Printf(
 				TEXT("Realized ProjectileTravel cue locally with policy %s. Assets: %s."),
-				*GetPresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
+				*GetProjectilePresentationVisibilityPolicyLabel(CueEvent.VisibilityPolicy),
 				*DescribeProjectileTravelCueAssets(CueEvent)));
 	}
 }

@@ -5,8 +5,11 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "InputMappingContext.h"
+#include "InputCoreTypes.h"
 #include "Blueprint/UserWidget.h"
+#include "Debug/MABSDebugHUD.h"
 #include "MABS.h"
+#include "MABSDemoHUD.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 void AMABSPlayerController::BeginPlay()
@@ -58,10 +61,41 @@ void AMABSPlayerController::SetupInputComponent()
 			}
 		}
 	}
+
+	if (IsLocalPlayerController() && InputComponent != nullptr)
+	{
+		InputComponent->BindKey(EKeys::F1, IE_Pressed, this, &AMABSPlayerController::HandleToggleDemoHelp);
+		InputComponent->BindKey(EKeys::F2, IE_Pressed, this, &AMABSPlayerController::HandleToggleDebugHarness);
+		InputComponent->BindKey(EKeys::F3, IE_Pressed, this, &AMABSPlayerController::HandleToggleValidationNotes);
+	}
 }
 
 bool AMABSPlayerController::ShouldUseTouchControls() const
 {
 	// are we on a mobile platform? Should we force touch?
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
+}
+
+void AMABSPlayerController::HandleToggleDemoHelp()
+{
+	if (AMABSDemoHUD* const DemoHUD = Cast<AMABSDemoHUD>(GetHUD()))
+	{
+		DemoHUD->ToggleHelpPanelEnabled();
+	}
+}
+
+void AMABSPlayerController::HandleToggleDebugHarness()
+{
+	if (AMABSDebugHUD* const DebugHUD = Cast<AMABSDebugHUD>(GetHUD()))
+	{
+		DebugHUD->ToggleOverlayEnabled();
+	}
+}
+
+void AMABSPlayerController::HandleToggleValidationNotes()
+{
+	if (AMABSDemoHUD* const DemoHUD = Cast<AMABSDemoHUD>(GetHUD()))
+	{
+		DemoHUD->ToggleValidationPanelEnabled();
+	}
 }

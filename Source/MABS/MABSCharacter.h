@@ -39,13 +39,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MABS|Example", meta=(ClampMin="1.0"))
 	float MaxExampleHealth = 100.0f;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Example")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Example", Replicated)
 	float CurrentExampleHealth = 100.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MABS|Example", meta=(ClampMin="1.0"))
 	float MaxExampleResource = 100.0f;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Example")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="MABS|Example", Replicated)
 	float CurrentExampleResource = 100.0f;
 
 	/** Jump Input Action */
@@ -68,6 +68,8 @@ public:
 
 	/** Constructor */
 	AMABSCharacter();	
+
+	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 
@@ -103,10 +105,25 @@ public:
 	virtual void DoJumpEnd();
 
 	UFUNCTION(BlueprintPure, Category="MABS|Example")
+	float GetExampleHealth() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Example")
 	float GetExampleHealthNormalized() const;
 
 	UFUNCTION(BlueprintPure, Category="MABS|Example")
+	float GetMaxExampleHealth() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Example")
+	float GetExampleResource() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Example")
 	float GetExampleResourceNormalized() const;
+
+	UFUNCTION(BlueprintPure, Category="MABS|Example")
+	float GetMaxExampleResource() const;
+
+	UFUNCTION(BlueprintCallable, Category="MABS|Example")
+	void RestoreExampleVitals();
 
 	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 
@@ -115,6 +132,9 @@ public:
 	virtual bool CanAffordMABSCost_Implementation(float Cost, UMABSAbilityDefinition* SourceAbility) override;
 
 	virtual bool SpendMABSCost_Implementation(float Cost, UMABSAbilityDefinition* SourceAbility) override;
+
+	UFUNCTION(Server, Reliable)
+	void ServerRestoreExampleVitals();
 
 public:
 

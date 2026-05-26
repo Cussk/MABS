@@ -2,153 +2,155 @@
 
 ## What it is
 
-This document explains the current Phase 12 ability model: authored definitions, optional grouped ability sets, granted runtime specs, combo follow-up state, optional AoE, optional periodic effects, timing-driven execution, socket-aware delivery, optional delivery handlers, optional montage playback, presentation, and editor-side authoring validation.
+This document explains the Phase 13 ability model.
+
+The gameplay ability model itself is still the Phase 12 runtime:
+
+* authored `UMABSAbilityDefinition`
+* optional grouped `UMABSAbilitySet`
+* granted runtime specs on `UMABSAbilityComponent`
+* optional combo, AoE, periodic, montage, and presentation data
+* optional custom delivery handlers
+
+Phase 13 adds one sample-facing authoring layer on top:
+
+* `UMABSDemoDisplayConfig`
+
+That sample asset does not change gameplay execution. It only tells the demo HUD how to label and describe sample abilities.
 
 ## Why it exists
 
-MABS stays readable by keeping authored data separate from live runtime state.
+The gameplay asset should answer what an ability does.
 
-Phase 11 added the delivery-handler seam. Phase 12 keeps that seam and adds validation so invalid delivery and handler authoring gets caught before runtime.
+The sample display asset should answer how the sample scene explains it.
+
+Keeping those two concerns separate avoids polluting core authored ability data with sample-map-only labels, input hints, and onboarding text.
 
 ## Ability definitions
 
-`UMABSAbilityDefinition` is the authored single-ability asset in `MABSCore`.
+`UMABSAbilityDefinition` remains the authored single-ability asset in `MABSCore`.
 
-Current authored fields cover:
+Current authored fields still cover:
 
-* identity and activation: `AbilityTag`, `DisplayName`, `ActivationPolicy`
-* target intent and gameplay outcome: `TargetType`, `InstantEffectType`, `EffectMagnitude`
-* usage rules: `CooldownSeconds`, `CooldownGroupTag`, `ResourceCost`
-* timing: `StartupDuration`, `DeliveryTime`, `RecoveryDuration`
-* delivery and sockets: `DeliveryMode`, optional `DeliveryHandlerClass`, delivery socket fields, offsets, and optional montage fields
-* presentation: `StartupPresentation`, `DeliveryPresentation`, and `ImpactPresentation`
-* combat breadth: `Combo`, `AoE`, and `PeriodicEffect`
+* identity and activation
+* delivery mode and optional `DeliveryHandlerClass`
+* target intent and gameplay outcomes
+* timing
+* cost and cooldown
+* combo, AoE, and periodic data
+* montage and presentation groups
+
+Phase 13 does not add new gameplay fields to `UMABSAbilityDefinition`.
 
 ## Authoring validation
 
-Phase 12 adds editor validation for `UMABSAbilityDefinition`.
+Phase 12 validation still applies.
 
-The validator checks:
+The validator continues to catch:
 
-* missing or unloadable `DeliveryHandlerClass`
-* handler classes that do not derive from `UMABSDeliveryHandler`
-* abstract handler classes
-* obvious handler/delivery-mode mismatches such as projectile handlers authored on melee abilities
-* common invalid direct / hit trace / melee / projectile field combinations
-* invalid combo, AoE, periodic, and gameplay-effect basics that runtime would otherwise reject later
+* invalid `DeliveryHandlerClass`
+* invalid built-in delivery authoring
+* invalid projectile class authoring
+* invalid combo, AoE, periodic, and basic gameplay-effect authoring
+
+Phase 13 depends on that safety because the sample scene is meant to be the first thing a new user trusts.
 
 ## Ability sets
 
-`UMABSAbilitySet` is the authored grouped-grant asset in `MABSCore`.
+`UMABSAbilitySet` is still the grouped-grant asset in `MABSCore`.
 
-It currently contains:
+Use it for:
 
-* `AbilityDefinitions`
-
-Use it when several abilities should be granted together, such as:
-
-* starting abilities
-* class or archetype bundles
-* enemy bundles
+* starter loadouts
+* sample loadouts
+* archetype bundles
 * test bundles
 
-Ability sets do not replace individual ability definitions. They only group them for grant authoring.
+Ability sets still reuse the normal grant path and do not introduce a second runtime state container.
+
+## Sample display authoring
+
+`UMABSDemoDisplayConfig` is a project-side data asset for the Phase 13 demo HUD.
+
+It currently stores:
+
+* overlay title and subtitle
+* hotbar ordering entries by `AbilityTag`
+* input labels for the readable sample hotbar
+* feature-summary text for each sample ability
+* help panel text
+* validation panel text
+
+This asset is for onboarding only. It does not drive authority, replication, delivery, or effects.
 
 ## Granted abilities
 
-Granting still creates a `FMABSAbilitySpec` on `UMABSAbilityComponent`.
+Granting still creates `FMABSAbilitySpec` entries on `UMABSAbilityComponent`.
 
-Each spec stores:
+Those runtime specs still hold:
 
-* the definition reference
-* a copied gameplay tag
-* a stable handle
-* the current runtime state
-* the last activation result
-* the personal cooldown end time
-* the activation start timestamp
-* the scheduled delivery timestamp
-* the recovery end timestamp
-* the combo window start time
-* the combo window end time
-* the queued combo follow-up tag, when one has been buffered
+* definition reference
+* gameplay tag
+* stable handle
+* runtime state
+* last activation result
+* cooldown timestamps
+* startup, delivery, and recovery timestamps
+* combo window timing
+* queued combo follow-up tag
 
-Ability sets do not add a second runtime state container. They reuse this same existing grant path.
+The Phase 13 demo HUD reads the existing debug summaries derived from that state. It does not replace it.
 
-## Activation flow
+## Runtime state versus sample display data
 
-Activation in Phase 7.5 still means:
+Authored ability data answers:
 
-1. code or input calls `TryActivateAbilityByTag`
-2. the request reaches authority
-3. combo follow-up requests may be queued against an already active melee ability
-4. authority validates grant, cooldown, cost, and authored gameplay effect data
-5. the granted spec enters `Startup`
-6. startup presentation triggers if authored
-7. the component optionally requests montage playback
-8. delivery executes at the authored delivery time
-9. delivery presentation triggers at that same timing point
-10. the server resolves the primary impact context
-11. optional AoE gathers the final actor set
-12. instant effects apply immediately to affected targets
-13. optional periodic effects start or refresh on affected targets
-14. impact presentation triggers after successful application
-15. authority spends cost, starts cooldown, and enters `Recovery`
-16. queued combo follow-ups start automatically when the current ability completes recovery
-
-## Runtime state versus authored data
-
-Authored data answers:
-
-* what one ability should do
-* how multiple abilities should be grouped for grant authoring
-* which delivery mode it uses
-* which optional delivery handler class it uses
-* whether it can branch into a combo follow-up
-* whether it resolves an AoE shape
-* whether it starts a periodic effect
-* how timing, sockets, montage playback, and presentation are configured
+* what an ability is
+* how it delivers
+* what effect it applies
+* when it delivers
+* whether it combos, uses AoE, or starts a periodic effect
 
 Runtime state answers:
 
 * which abilities are granted
-* whether a granted ability is idle, in startup, active, recovery, or blocked
-* what happened on the last activation request
-* when its personal cooldown ends
-* when startup began
-* when delivery is scheduled
-* when recovery ends
-* whether a combo window is open and which follow-up has been queued
-* which periodic effects are currently active on authority
+* whether an ability is idle, startup, active, recovery, or blocked
+* cooldown and combo timing
+* recent trace, delivery, and effect events
+* active periodic effects
+
+Sample display data answers:
+
+* what label the sample hotbar should show
+* what input label the sample scene should teach
+* what short feature summary the sample HUD should call out
 
 ## How to use it
 
-1. Create one or more `UMABSAbilityDefinition` assets.
-2. Optionally create a `UMABSAbilitySet`.
-3. Fill `AbilityDefinitions` when several abilities should be granted together.
-4. Leave `DeliveryHandlerClass` empty to use the built-in handler for the authored delivery mode, or assign a custom handler class when one ability needs custom delivery behavior.
-5. Run asset validation and fix any invalid delivery or handler errors.
-6. Grant either the definition or the set on authority.
-7. Activate abilities with `TryActivateAbilityByTag`.
-8. Inspect `FMABSAbilitySpec`, active periodic effects, and recent debug events.
+1. Author or reuse your `UMABSAbilityDefinition` assets.
+2. Optionally group them in a `UMABSAbilitySet`.
+3. Create a `UMABSDemoDisplayConfig` for the sample map.
+4. Add one display entry per sample ability tag with an input label and short feature summary.
+5. Assign the config on a Blueprint subclass of `AMABSDemoHUD`.
+6. Grant abilities on authority and activate them normally.
+7. Use the sample HUD to confirm ready/cooldown state, costs, combo windows, and feature callouts.
 
 ## Example
 
-Example grouped player starter:
+Example Phase 13 sample set:
 
-* `DA_Player_Attack`
-* `DA_Player_Dodge`
-* `DA_Player_Heal`
-* `DA_StartingAbilities_Player.AbilityDefinitions = [Attack, Dodge, Heal]`
+* `Ability.Sample.SelfHeal`
+* `Ability.Sample.RifleShot`
+* `Ability.Sample.SwordSwing`
+* `Ability.Sample.SwordFollowup`
+* `Ability.Sample.Fireball`
+* `Ability.Sample.KnockbackShot`
 
-Example explosive fireball:
+Example matching demo display entries:
 
-* `DeliveryMode = Projectile`
-* `AoE.bEnabled = true`
-* `AoE.Shape = Sphere`
-* `AoE.Radius = 250`
-* `PeriodicEffect.bEnabled = true`
-* `PeriodicEffect.EffectType = DOT`
-* `PeriodicEffect.Duration = 4.0`
-* `PeriodicEffect.TickInterval = 1.0`
-* `PeriodicEffect.TickMagnitude = 6.0`
+* `InputLabel = "1"` and `FeatureSummary = "Direct self-heal, cost, cooldown"`
+* `InputLabel = "2"` and `FeatureSummary = "Built-in hit trace, tracer, impact"`
+* `InputLabel = "3"` and `FeatureSummary = "Built-in melee sweep, combo starter"`
+* `InputLabel = "4"` and `FeatureSummary = "Follow-up combo window proof"`
+* `InputLabel = "5"` and `FeatureSummary = "Projectile, AoE, periodic burn"`
+* `InputLabel = "6"` and `FeatureSummary = "Custom knockback hit trace handler"`

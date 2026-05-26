@@ -12,6 +12,7 @@
 #include "InputActionValue.h"
 #include "MABS.h"
 #include "Math/UnrealMathUtility.h"
+#include "Net/UnrealNetwork.h"
 
 AMABSCharacter::AMABSCharacter()
 {
@@ -52,6 +53,14 @@ AMABSCharacter::AMABSCharacter()
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+}
+
+void AMABSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AMABSCharacter, CurrentExampleHealth);
+	DOREPLIFETIME(AMABSCharacter, CurrentExampleResource);
 }
 
 void AMABSCharacter::BeginPlay()
@@ -144,14 +153,46 @@ void AMABSCharacter::DoJumpEnd()
 	StopJumping();
 }
 
+float AMABSCharacter::GetExampleHealth() const
+{
+	return CurrentExampleHealth;
+}
+
 float AMABSCharacter::GetExampleHealthNormalized() const
 {
 	return MaxExampleHealth > 0.0f ? CurrentExampleHealth / MaxExampleHealth : 0.0f;
 }
 
+float AMABSCharacter::GetMaxExampleHealth() const
+{
+	return MaxExampleHealth;
+}
+
+float AMABSCharacter::GetExampleResource() const
+{
+	return CurrentExampleResource;
+}
+
 float AMABSCharacter::GetExampleResourceNormalized() const
 {
 	return MaxExampleResource > 0.0f ? CurrentExampleResource / MaxExampleResource : 0.0f;
+}
+
+float AMABSCharacter::GetMaxExampleResource() const
+{
+	return MaxExampleResource;
+}
+
+void AMABSCharacter::RestoreExampleVitals()
+{
+	if (!HasAuthority())
+	{
+		ServerRestoreExampleVitals();
+		return;
+	}
+
+	CurrentExampleHealth = MaxExampleHealth;
+	CurrentExampleResource = MaxExampleResource;
 }
 
 float AMABSCharacter::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
@@ -196,4 +237,9 @@ bool AMABSCharacter::SpendMABSCost_Implementation(float Cost, UMABSAbilityDefini
 
 	CurrentExampleResource = FMath::Clamp(CurrentExampleResource - Cost, 0.0f, MaxExampleResource);
 	return true;
+}
+
+void AMABSCharacter::ServerRestoreExampleVitals_Implementation()
+{
+	RestoreExampleVitals();
 }

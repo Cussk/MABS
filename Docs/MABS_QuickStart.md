@@ -2,104 +2,128 @@
 
 ## What it is
 
-This guide covers the current Phase 9 setup. MABS now supports:
+This is the Phase 13 quickstart path.
 
-* individual `UMABSAbilityDefinition` assets
-* grouped `UMABSAbilitySet` assets
-* `Direct`, `HitTrace`, `Melee`, and `Projectile` delivery
-* authored startup, delivery, and recovery timing
-* optional combo, AoE, and periodic effect data
-* startup, delivery, tracer, projectile-travel, and impact presentation
-* the runtime debug harness
+The intended first-use flow is no longer "start from a blank actor and wire everything manually."
+
+It is now:
+
+* open the sample map
+* trigger the sample abilities in order
+* read the demo HUD
+* inspect the sample assets after you already know what working behavior looks like
 
 ## Why it exists
 
-The goal is to get from a blank actor or character to a multiplayer-safe ability workflow that:
+The framework already had the runtime features. What it lacked was a fast first proof.
 
-* validates and grants on authority
-* lets designers author one ability at a time
-* optionally groups multiple abilities into a starting bundle
-* activates by gameplay tag through the normal existing runtime path
-* exposes readable runtime inspection for grant, activation, delivery, combo, periodic, and cue flow
+Phase 13 fixes that by making the sample map the default onboarding path.
 
 ## How to use it
 
-### Step 1: Add `UMABSAbilityComponent`
+### Step 1: Open the sample map
 
-Add the component to the actor or character that owns abilities.
+Open the Phase 13 sample map in the editor and play from the central spawn area.
 
-### Step 2: Create one or more `UMABSAbilityDefinition` assets
+The map should point you to the sample stations for:
 
-Set:
+* direct
+* hit trace
+* melee
+* combo
+* projectile / periodic / AoE
+* custom delivery handler
 
-* core ability fields
-* target and delivery fields
-* timing fields
-* optional combo, AoE, or periodic effect fields
-* optional presentation fields
+### Step 2: Use the sample HUD path
 
-### Step 3: Optionally create a `UMABSAbilitySet`
+Use `AMABSGameMode` or a derived sample game mode so the default HUD is `AMABSDemoHUD`.
 
-Create a data asset of type `UMABSAbilitySet` and fill `AbilityDefinitions` with the abilities that should be granted together.
+Recommended setup:
 
-Use sets for:
+* create a Blueprint subclass of `AMABSDemoHUD`
+* assign a `UMABSDemoDisplayConfig`
+* set that Blueprint HUD on the sample game mode if you want custom labels and help text
 
-* starting player abilities
-* archetype loadouts
-* enemy ability bundles
-* test harness bundles
+The technical debug harness is still available underneath this through `F2`.
 
-### Step 4: Grant on authority
+### Step 3: Spawn with a sample-ready pawn
 
-Grant either:
+Your sample pawn should include:
 
-* a single ability with `GrantAbility(...)`
-* one set with `GrantAbilitySet(...)`
-* multiple sets with `GrantAbilitySets(...)`
+* `UMABSAbilityComponent`
+* granted sample abilities or one sample `UMABSAbilitySet`
+* `AMABSCharacter` or a derived sample character if you want the replicated example health/resource HUD values
 
-Grouped granting is still a convenience workflow only. It reuses the normal per-ability grant rules.
+### Step 4: Trigger the stations in this order
 
-### Step 5: Activate by tag
+Recommended order:
 
-Call `TryActivateAbilityByTag(...)` with the tag of a granted ability.
+1. direct self-heal
+2. hit trace rifle shot
+3. melee sword swing
+4. combo follow-up
+5. projectile fireball
+6. custom knockback handler
 
-### Step 6: Optionally enable the runtime harness
+The demo HUD is built to make that order easy to read.
 
-If you want in-game inspection:
+### Step 5: Use the built-in toggles
 
-* set the HUD class to `AMABSDebugHUD`
-* leave debug replication enabled on authority
-* run `mabs.DebugHarness 1`
+The sample controller now binds:
 
-## Example setups
+* `F1` = toggle the demo help panel
+* `F2` = toggle the technical debug harness
+* `F3` = toggle validation notes
 
-Example starting player bundle:
+### Step 6: Inspect the sample assets
 
-* create `DA_Player_Attack`
-* create `DA_Player_Dodge`
-* create `DA_Player_Heal`
-* create `DA_StartingAbilities_Player` as a `UMABSAbilitySet`
-* fill `AbilityDefinitions` with the three ability assets
-* call `GrantAbilitySet(DA_StartingAbilities_Player)` on the server at spawn
+After you have seen the map working, inspect:
 
-Example single authored projectile with harness inspection:
+* the sample `UMABSAbilityDefinition` assets
+* the sample `UMABSAbilitySet`
+* the sample `UMABSDemoDisplayConfig`
+* `UMABSExampleKnockbackHitTraceDeliveryHandler`
 
-* `DeliveryMode = Projectile`
-* `ProjectileActorClass = BP_MABS_Fireball`
-* `DeliveryPresentation.Cue.VFX = P_FireballCast`
-* `DeliveryPresentation.ProjectileTravel.TravelVFX = P_FireballTrail`
-* `ImpactPresentation.Cue.VFX = P_FireballImpact`
-* set the HUD class to `AMABSDebugHUD`
-* use the harness to inspect the targeting / delivery section and recent event history
+### Step 7: Duplicate one sample ability and change it
+
+Good first modification:
+
+* duplicate the hit trace or projectile sample ability
+* change its effect magnitude, cooldown, or presentation
+* update the matching `UMABSDemoDisplayConfig` entry
+* retest in the sample map
+
+## Example setup
+
+Minimal Phase 13 sample setup:
+
+* sample game mode uses `AMABSDemoHUD`
+* sample HUD Blueprint references one `UMABSDemoDisplayConfig`
+* sample character derives from `AMABSCharacter`
+* sample character owns `UMABSAbilityComponent`
+* authority grants six sample abilities on spawn
+* the sample config maps those six ability tags to the hotbar labels `1` through `6`
 
 ## Multiplayer note
 
-Ability sets do not add a separate replication model.
+Phase 13 does not create a separate sample replication model.
 
-The server still grants the underlying abilities one by one through the existing authority path, granted runtime state still lives on `UMABSAbilityComponent`, and the harness reads that authoritative state back on the owning client.
+The sample HUD reads:
 
-## Phase 9 note
+* existing `UMABSAbilityComponent` summaries and debug events
+* replicated sample vitals from `AMABSCharacter`
 
-This setup flow is unchanged in Phase 9.
+That keeps the readable sample overlay correct on owning clients in standalone, listen server, and dedicated server play.
 
-The cleanup work is internal to `MABSGameplay`, so you still grant on authority and activate by tag through `UMABSAbilityComponent`.
+## Not included
+
+This quickstart does not replace the lower-level setup path.
+
+If you want to integrate MABS into a different project, you still:
+
+* add `UMABSAbilityComponent`
+* author `UMABSAbilityDefinition` assets
+* grant on authority
+* activate by gameplay tag
+
+Phase 13 just makes the sample scene the recommended first proof.
